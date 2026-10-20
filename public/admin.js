@@ -16,7 +16,11 @@
   async function api(path, opts) {
     const r = await fetch(path, { credentials: 'same-origin', ...opts });
     if (r.status === 401) { showLogin(); throw new Error('signed out'); }
-    if (!r.ok) { const b = await r.json().catch(() => ({})); const e = new Error(b.message || `HTTP ${r.status}`); e.field = b.field; throw e; }
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({}));
+      if (r.status === 403 && b.mustChange && me) { showChangePassword(me); throw new Error('signed out'); }
+      const e = new Error(b.message || `HTTP ${r.status}`); e.field = b.field; throw e;
+    }
     return r.json();
   }
   const post = (path, body, method = 'POST') => api(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -85,7 +89,7 @@
   function showLogin(message) {
     closeStream();
     if ($('dlg').open) $('dlg').close();
-    $('appView').hidden = true; $('loginView').hidden = false;
+    $('appView').hidden = true; $('pwView').hidden = true; $('loginView').hidden = false;
     $('key').value = '';
     $('loginErr').textContent = message || '';
     ($('user').value ? $('key') : $('user')).focus();
@@ -97,6 +101,7 @@
       const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: $('user').value, password: $('key').value }) });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) { $('loginErr').textContent = body.message || 'Sign-in failed. Try again.'; return; }
+      lastPassword = $('key').value;
       start(body.user);
     } catch { $('loginErr').textContent = 'The server could not be reached. Check your connection.'; }
   });
@@ -120,8 +125,39 @@
     },
   }));
 
+  // First sign-in with a password the administrator set: the client chooses their own before continuing.
+  let lastPassword = '';
+  function showChangePassword(user) {
+    closeStream();
+    if ($('dlg').open) $('dlg').close();
+    $('appView').hidden = true; $('loginView').hidden = true; $('pwView').hidden = false;
+    $('pwIntro').textContent = `Welcome, ${user.name}. You signed in with a temporary password from the event administrator. Choose your own password to continue.`;
+    $('pwCur').value = lastPassword; $('pwNew').value = ''; $('pwAgain').value = ''; $('pwErr').textContent = '';
+    ($('pwCur').value ? $('pwNew') : $('pwCur')).focus();
+  }
+  $('pwForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('pwErr').textContent = '';
+    if ($('pwNew').value !== $('pwAgain').value) { $('pwErr').textContent = 'The two new passwords don’t match.'; return; }
+    try {
+      const r = await fetch('/api/admin/me/password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ current: $('pwCur').value, next: $('pwNew').value }) });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 401) return showLogin('Your session ended. Sign in again with the temporary password.');
+      if (!r.ok) { $('pwErr').textContent = body.message || 'The password could not be changed. Try again.'; return; }
+      lastPassword = '';
+      $('pwView').hidden = true;
+      start({ ...me, mustChange: false });
+    } catch { $('pwErr').textContent = 'The server could not be reached. Check your connection.'; }
+  });
+  $('pwSignOut').addEventListener('click', async () => {
+    await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
+    showLogin();
+  });
+
   async function start(user) {
     me = user;
+    if (me.mustChange) return showChangePassword(me);
+    $('pwView').hidden = true;
     document.documentElement.dataset.role = me.role;
     document.documentElement.dataset.charts = me.canCharts ? 'yes' : 'no';
     $('loginView').hidden = true; $('appView').hidden = false;
@@ -257,7 +293,7 @@
       <td><b>${esc(u.name)}</b><span class="small">${esc(u.username)}</span></td>
       <td>${u.events.map((e) => esc(e.name)).join('<br>') || '<span style="color:var(--muted)">None</span>'}</td>
       <td>${[u.canExport ? 'Download' : '', u.canCharts ? 'Charts' : ''].filter(Boolean).join(' · ') || '<span style="color:var(--muted)">View only</span>'}</td>
-      <td>${u.active ? `<span class="badge in">${ICON.check}Active</span>` : '<span class="badge off">Turned off</span>'}</td>
+      <td>${u.active ? `<span class="badge in">${ICON.check}Active</span>` : '<span class="badge off">Turned off</span>'}${u.temporaryPassword ? '<span class="small">Temporary password, not yet changed</span>' : ''}</td>
       <td class="num">${u.lastLoginAt ? esc(dateTimeOf(u.lastLoginAt)) : '<span style="color:var(--muted)">Never</span>'}</td>
       <td><div class="row-actions">
         <button class="btn btn-quiet btn-sm" type="button" data-act="events">Events…</button>
@@ -270,8 +306,8 @@
       : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">No client users yet. Add one above.</td></tr>';
   }
   function showCreated(title, name, username, password) {
-    const text = `Sign-in details for ${name}\nPage: ${location.origin}/admin\nUsername: ${username}\nPassword: ${password}`;
-    $('uDone').innerHTML = `<b>${esc(title)}</b> Send these details to ${esc(name)}. The password isn't shown again.<pre>${esc(text)}</pre><button class="btn btn-quiet btn-sm" type="button" id="uCopy">Copy details</button>`;
+    const text = `Sign-in details for ${name}\nPage: ${location.origin}/admin\nUsername: ${username}\nTemporary password: ${password}`;
+    $('uDone').innerHTML = `<b>${esc(title)}</b> Send these details to ${esc(name)}. This is a temporary password: they'll be asked to choose their own the first time they sign in. It isn't shown again.<pre>${esc(text)}</pre><button class="btn btn-quiet btn-sm" type="button" id="uCopy">Copy details</button>`;
     $('uDone').hidden = false;
     $('uCopy').addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(text); $('uCopy').textContent = 'Copied'; } catch { $('uCopy').textContent = 'Select the text above and copy it'; }
@@ -311,7 +347,7 @@
     } else if (act === 'pw') {
       openDialog({
         title: `Reset password for ${u.name}`,
-        body: '<p>They will be signed out and need the new password to sign in again.</p>',
+        body: '<p>They will be signed out. The new password is temporary: they’ll be asked to choose their own when they next sign in.</p>',
         fields: [{ id: 'pw', label: 'New password', value: genPassword(), help: 'At least 8 characters. You can type your own.' }],
         okLabel: 'Reset password',
         run: async (v) => { await patch({ password: v.pw }); showCreated('Password reset.', u.name, u.username, v.pw); reloadUsers(); },

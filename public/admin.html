@@ -64,6 +64,7 @@
   .login form { width: min(400px, 100%); background: var(--surface); border-radius: 16px; padding: 32px; display: flex; flex-direction: column; gap: 14px; }
   .login h1 { font: 800 1.7rem/1.1 var(--display); margin: 0; }
   .login p { margin: 0; color: var(--muted); }
+  .login p.err { color: var(--error); }
   .login label { font-weight: 600; font-size: .92rem; }
   .login input { width: 100%; font: inherit; color: var(--ink); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 10px; padding: .7rem .8rem; min-height: 46px; }
   .err { color: var(--error); font-size: .9rem; margin: 0; }
@@ -373,6 +374,28 @@
     <input id="key" type="password" autocomplete="current-password" required>
     <p class="err" id="loginErr" role="alert"></p>
     <button class="btn btn-primary" type="submit">Sign in</button>
+    <footer class="powered">
+      <span>Powered by</span>
+      <picture><source srcset="/jupiter-logo-light.png" media="(prefers-color-scheme: dark)"><img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24"></picture>
+    </footer>
+  </form>
+</main>
+
+<!-- First sign-in with a temporary password -->
+<main class="login" id="pwView" hidden>
+  <form id="pwForm" novalidate>
+    <h1>Choose your password</h1>
+    <p id="pwIntro">You signed in with a temporary password. Choose your own to continue.</p>
+    <label for="pwCur">Temporary password</label>
+    <input id="pwCur" type="password" autocomplete="current-password">
+    <label for="pwNew">New password</label>
+    <input id="pwNew" type="password" autocomplete="new-password" aria-describedby="pwHelp">
+    <p class="help" id="pwHelp" style="margin:-8px 0 0;color:var(--muted);font-size:.85rem">At least 8 characters. Only you will know it.</p>
+    <label for="pwAgain">New password again</label>
+    <input id="pwAgain" type="password" autocomplete="new-password">
+    <p class="err" id="pwErr" role="alert"></p>
+    <button class="btn btn-primary" type="submit">Save and continue</button>
+    <button class="linkish" type="button" id="pwSignOut" style="align-self:center">Sign out</button>
     <footer class="powered">
       <span>Powered by</span>
       <picture><source srcset="/jupiter-logo-light.png" media="(prefers-color-scheme: dark)"><img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24"></picture>
