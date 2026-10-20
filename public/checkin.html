@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Staff check-in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="fontLink" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F2F2F2; --surface: #FFFFFF; --ink: #141414; --muted: #5C5C5C; --line: #D4D4D4;
+    --cobalt: #E00000; --on-cobalt: #FFFFFF; --error: #B8322A; --ok: #1E7A4C; --warn: #A86A00;
+    --ok-bg: #E2F3EA; --warn-bg: #FBF0D6; --error-bg: #FBE4E1;
+    --display: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    --body: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light; box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121212; --surface: #1C1C1E; --ink: #EDEDED; --muted: #A6A6A6; --line: #3A3A3E;
+      --cobalt: #FF5C5C; --on-cobalt: #141414; --error: #F08A7E; --ok: #63C795; --warn: #E9B54A;
+      --ok-bg: #16352A; --warn-bg: #3A2F14; --error-bg: #3D1E1E; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121212; --surface: #1C1C1E; --ink: #EDEDED; --muted: #A6A6A6; --line: #3A3A3E;
+    --cobalt: #FF5C5C; --on-cobalt: #141414; --error: #F08A7E; --ok: #63C795; --warn: #E9B54A;
+    --ok-bg: #16352A; --warn-bg: #3A2F14; --error-bg: #3D1E1E; color-scheme: dark;
+  }
+  html { height: 100%; }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.5 var(--body); }
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 1.25rem; }
+  h1 { font: 700 1.9rem/1.05 var(--display); letter-spacing: -0.02em; margin: 0; }
+  .evname { margin: 0 0 4px; color: var(--muted); font-weight: 700; font-size: .95rem; }
+  .count { color: var(--muted); font-size: .95rem; white-space: nowrap; }
+  .count b { color: var(--ink); font: 800 1.2rem var(--display); }
+  label { display: block; font-weight: 600; font-size: .93rem; margin-bottom: .35rem; }
+  input { width: 100%; font: inherit; color: var(--ink); background: var(--surface); border: 1.5px solid var(--line); border-radius: 10px; padding: .72rem .85rem; min-height: 48px; }
+  .row { display: flex; gap: .6rem; }
+  .row input { flex: 1; }
+  .btn { min-height: 48px; padding: .7rem 1.2rem; border-radius: 10px; border: 1.5px solid transparent; font: 600 1rem var(--body); cursor: pointer; background: var(--cobalt); color: var(--on-cobalt); }
+  .btn-quiet { background: transparent; color: var(--ink); border-color: var(--line); }
+  .err { color: var(--error); font-size: .9rem; margin: .4rem 0 0; }
+  .err:empty { display: none; }
+  #reader { width: 100%; background: #141414; border-radius: 14px; overflow: hidden; min-height: 240px; display: grid; place-items: center; color: #A6A6A6; font-size: .92rem; text-align: center; }
+  #reader video { border-radius: 14px; }
+  .result { margin: 1rem 0 1.5rem; border-radius: 14px; padding: 1.1rem 1.25rem; background: var(--surface); border: 2px solid var(--line); min-height: 112px; }
+  .result h2 { font: 800 1.45rem/1.15 var(--display); margin: 0 0 .25rem; }
+  .result p { margin: 0; }
+  .result .sub { color: var(--muted); }
+  .result.ok { background: var(--ok-bg); border-color: var(--ok); }
+  .result.ok h2 { color: var(--ok); }
+  .result.warn { background: var(--warn-bg); border-color: var(--warn); }
+  .result.warn h2 { color: var(--warn); }
+  .result.bad { background: var(--error-bg); border-color: var(--error); }
+  .result.bad h2 { color: var(--error); }
+  .manual { margin-top: 1.25rem; }
+  .powered { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .powered img { display: block; height: 24px; width: auto; }
+  .wrap .powered { margin-top: 2rem; justify-content: center; }
+  .foot { margin-top: 2rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; color: var(--muted); font-size: .88rem; }
+
+  /* ---------- name tag settings ---------- */
+  .printbar { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; padding: .75rem 1rem; margin-bottom: 1rem; font-size: .93rem; }
+  .printbar label { display: inline-flex; align-items: center; gap: .5rem; margin: 0; font-weight: 600; cursor: pointer; }
+  .printbar input[type=checkbox] { width: 20px; height: 20px; min-height: 0; accent-color: var(--cobalt); }
+  .printbar select { font: inherit; color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 8px; padding: .4rem .5rem; min-height: 40px; }
+  .printbar .btn { min-height: 40px; padding: .4rem .9rem; font-size: .9rem; }
+  .reprint { margin-top: .8rem; }
+  .modebar { display: flex; gap: .4rem; margin-bottom: 1rem; }
+  .modebar button { flex: 1; min-height: 44px; border-radius: 10px; border: 1.5px solid var(--line); background: transparent; color: var(--ink); font: 600 .95rem var(--body); cursor: pointer; }
+  .modebar button[aria-pressed="true"] { background: var(--cobalt); color: var(--on-cobalt); border-color: var(--cobalt); }
+  #scanZone { position: relative; border: 2.5px dashed var(--line); border-radius: 14px; padding: 1.4rem 1.25rem; background: var(--surface); cursor: text; }
+  #scanZone.ready { border-style: solid; border-color: var(--ok); }
+  #scanZone h2 { font: 800 1.35rem/1.15 var(--display); margin: 0 0 .2rem; }
+  #scanZone p { margin: 0; color: var(--muted); }
+  #scanZone .dot { display: inline-block; width: .7em; height: .7em; border-radius: 50%; background: var(--warn); margin-right: .45em; vertical-align: .05em; }
+  #scanZone.ready .dot { background: var(--ok); }
+  #scanInput { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; cursor: text; font-size: 16px; }
+  .reprint .btn { min-height: 40px; padding: .4rem 1rem; font-size: .92rem; }
+
+  /* ---------- the printed tag (only visible when printing) ---------- */
+  #tag { display: none; }
+  @media print {
+    html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+    :root { padding: 0 !important; }
+    main.wrap { display: none !important; }
+    #tag {
+      display: flex !important; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+      width: var(--tag-w); height: var(--tag-h); padding: 6% 7%; box-sizing: border-box; overflow: hidden;
+      color: #000; font-family: var(--display); page-break-inside: avoid; break-inside: avoid;
+    }
+    #tag .t-ev { font: 700 calc(var(--tag-h) * .05)/1.2 var(--body); text-transform: uppercase; letter-spacing: .06em; padding-bottom: .45em; margin-bottom: .7em; border-bottom: 1.5px solid #000; max-width: 100%; }
+    #tag .t-nm { font-weight: 800; line-height: 1.02; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+    #tag .t-ds { font: 600 calc(var(--tag-h) * .085)/1.2 var(--body); margin-top: .55em; overflow-wrap: anywhere; }
+    #tag { position: relative; padding-bottom: 11% !important; }
+    #tag .t-pw { position: absolute; left: 0; right: 0; bottom: 3.5%; display: flex; align-items: center; justify-content: center; gap: .45em; font: 400 calc(var(--tag-h) * .034)/1 var(--body); color: #555; }
+    #tag .t-pw img { height: calc(var(--tag-h) * .062); width: auto; display: block; }
+    #tag .t-co { font: 400 calc(var(--tag-h) * .08)/1.2 var(--body); margin-top: .15em; overflow-wrap: anywhere; }
+    #tag .t-logo { max-height: calc(var(--tag-h) * .14); max-width: 60%; width: auto; height: auto; display: block; margin: 0 auto calc(var(--tag-h) * .03); }
+  }
+</style>
+<style id="pageSize">@page { size: 4in 3in; margin: 0; } :root { --tag-w: 4in; --tag-h: 3in; }</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div><p class="evname" id="evName"></p><h1>Check-in</h1></div>
+    <div class="count" id="count" hidden><b id="cIn">0</b> of <span id="cTotal">0</span> checked in</div>
+  </header>
+
+  <form id="pinForm">
+    <label for="pin">Staff PIN</label>
+    <div class="row">
+      <input id="pin" type="password" inputmode="numeric" autocomplete="off" required>
+      <button class="btn" type="submit">Start checking in</button>
+    </div>
+    <p class="err" id="pinErr" role="alert"></p>
+  </form>
+
+  <section id="station" hidden>
+    <div class="printbar">
+      <label><input type="checkbox" id="autoPrint"> Print name tag on check-in</label>
+      <select id="tagSize" aria-label="Name tag size">
+        <option value="4in 3in">4 × 3 in badge</option>
+        <option value="4in 2in">4 × 2 in label</option>
+        <option value="3.5in 2.25in">3.5 × 2.25 in label</option>
+        <option value="90mm 55mm">90 × 55 mm card</option>
+        <option value="A6 landscape">A6 sheet</option>
+      </select>
+      <button class="btn btn-quiet" id="testPrint" type="button">Test print</button>
+    </div>
+    <div class="modebar" role="group" aria-label="How to scan passes">
+      <button type="button" id="modeScanner" aria-pressed="true">Barcode scanner</button>
+      <button type="button" id="modeCamera" aria-pressed="false">Phone camera</button>
+    </div>
+    <div id="scanZone">
+      <h2 id="scanTitle"><span class="dot"></span><span id="scanState">Click here to start scanning</span></h2>
+      <p id="scanHint">Then scan the QR code on the attendee's phone or printout.</p>
+      <input id="scanInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="none" aria-label="Scanned pass">
+    </div>
+    <div id="reader" hidden>Starting camera…</div>
+    <div class="result" id="result" aria-live="assertive">
+      <h2>Ready to scan</h2>
+      <p class="sub">Scan the attendee's QR code.</p>
+    </div>
+
+    <form class="manual" id="manualForm">
+      <label for="code">Or type the pass code from their email</label>
+      <div class="row">
+        <input id="code" autocomplete="off" autocapitalize="characters" placeholder="K7Q2-M9XD" maxlength="64">
+        <button class="btn" type="submit">Check in</button>
+      </div>
+    </form>
+
+    <div class="foot">
+      <span id="footNote">Keep this window selected while scanning.</span>
+      <button class="btn btn-quiet" id="lock" type="button">Lock station</button>
+    </div>
+  </section>
+  <footer class="powered">
+    <span>Powered by</span>
+    <picture><source srcset="/jupiter-logo-light.png" media="(prefers-color-scheme: dark)"><img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24"></picture>
+  </footer>
+</main>
+
+<div id="tag" aria-hidden="true">
+  <img class="t-logo" id="tLogo" alt="" hidden>
+  <div class="t-ev" id="tEv"></div>
+  <div class="t-nm" id="tNm"></div>
+  <div class="t-ds" id="tDs"></div>
+  <div class="t-co" id="tCo"></div>
+  <div class="t-pw">Powered by <img src="/jupiter-logo.png" alt=""></div>
+</div>
+
+<script src="/shared.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let pin = '';
+  let scanner = null;
+  let last = { text: '', at: 0 };
+  let busy = false;
+  let eventName = '';
+  let tagLogo = null;
+  const slug = decodeURIComponent(location.pathname.split('/')[1] || '');
+  const API = `/api/e/${encodeURIComponent(slug)}`;
+  const PIN_KEY = `staffPin:${slug}`;
+
+  // ---------- name tags ----------
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  const SIZES = { 'A6 landscape': ['148mm', '105mm'] };
+  function applySize(value) {
+    const [w, h] = SIZES[value] || value.split(' ');
+    $('pageSize').textContent = `@page { size: ${value}; margin: 0; } :root { --tag-w: ${w}; --tag-h: ${h}; }`;
+  }
+  $('autoPrint').checked = store.get('autoPrint') === '1';
+  const savedSize = store.get('tagSize');
+  if (savedSize && [...$('tagSize').options].some((o) => o.value === savedSize)) $('tagSize').value = savedSize;
+  applySize($('tagSize').value);
+  $('autoPrint').addEventListener('change', (e) => store.set('autoPrint', e.target.checked ? '1' : '0'));
+  $('tagSize').addEventListener('change', (e) => { store.set('tagSize', e.target.value); applySize(e.target.value); });
+
+  fetch(API).then((r) => {
+    if (r.status === 404) throw new Error('missing');
+    return r.json();
+  }).then((ev) => {
+    eventName = ev.badge.showEventName ? ev.details.name : '';
+    $('evName').textContent = ev.details.name;
+    document.title = `Check-in: ${ev.details.name}`;
+    const b = ev.branding, rs = document.documentElement.style;
+    rs.setProperty('--cobalt', b.primary);
+    rs.setProperty('--on-cobalt', EG.textOn(b.primary));
+    rs.setProperty('--display', EG.fontStack(b.headingFont));
+    rs.setProperty('--body', EG.fontStack(b.bodyFont));
+    const url = EG.googleFontsUrl([b.headingFont, b.bodyFont]);
+    if (url) $('fontLink').href = url;
+    tagLogo = b.logoOnTag && b.logo ? b.logo : null;
+    if (tagLogo) { $('tLogo').src = tagLogo; }
+    if (ev.status === 'archived') throw new Error('ended');
+  }).catch((err) => {
+    $('evName').textContent = '';
+    $('pinForm').hidden = true;
+    $('pinErr').textContent = '';
+    const m = document.createElement('p');
+    m.className = 'err';
+    m.textContent = err.message === 'ended' ? 'This event has ended, so check-in is closed.' : 'This event was not found. Check the check-in link.';
+    $('pinForm').after(m);
+  });
+
+  function printTag(a) {
+    $('tEv').textContent = eventName;
+    $('tEv').hidden = !eventName;
+    $('tLogo').hidden = !tagLogo;
+    $('tNm').textContent = a.name;
+    $('tDs').textContent = a.line2 || '';
+    $('tDs').hidden = !a.line2;
+    $('tCo').textContent = a.line3 || '';
+    $('tCo').hidden = !a.line3;
+    // Shrink long names so they stay on the tag.
+    const len = a.name.length;
+    const scale = len <= 14 ? .19 : len <= 20 ? .155 : len <= 28 ? .12 : len <= 40 ? .1 : .082;
+    $('tNm').style.fontSize = `calc(var(--tag-h) * ${scale})`;
+    setTimeout(() => window.print(), 50);
+  }
+  function addReprint(a) {
+    const wrap = document.createElement('div');
+    wrap.className = 'reprint';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn btn-quiet';
+    b.textContent = 'Print name tag';
+    b.addEventListener('click', () => printTag(a));
+    wrap.appendChild(b);
+    $('result').appendChild(wrap);
+  }
+  $('testPrint').addEventListener('click', () => printTag({ name: 'Juan dela Cruz', line2: 'Operations Manager', line3: 'Sample Company Inc.' }));
+
+  function setCounts(c) {
+    if (!c) return;
+    $('cIn').textContent = c.checkedIn;
+    $('cTotal').textContent = c.total;
+    $('count').hidden = false;
+  }
+
+  function show(kind, title, lines) {
+    const r = $('result');
+    r.className = 'result ' + kind;
+    const h = document.createElement('h2');
+    h.textContent = title;
+    const nodes = [h];
+    lines.filter((l) => l && l[0]).forEach(([text, cls]) => {
+      const p = document.createElement('p');
+      p.textContent = text;
+      if (cls) p.className = cls;
+      nodes.push(p);
+    });
+    r.replaceChildren(...nodes);
+    if (navigator.vibrate) navigator.vibrate(kind === 'ok' ? 80 : [60, 60, 60]);
+  }
+
+  async function verifyPin(candidate) {
+    const r = await fetch(`${API}/staff/verify`, { method: 'POST', headers: { 'x-staff-pin': candidate } });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.message || 'That PIN is incorrect.');
+    return body;
+  }
+
+  let queued = null;
+  async function checkIn(token) {
+    if (busy) { queued = token; return; }
+    busy = true;
+    try {
+      const r = await fetch(`${API}/checkin`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-staff-pin': pin },
+        body: JSON.stringify({ token }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 401) { lock(); $('pinErr').textContent = 'The PIN was rejected. Enter it again.'; return; }
+      if (!r.ok) return show('bad', 'Check-in failed', [[body.message || 'Try again.']]);
+      setCounts(body.counts);
+      const a = body.attendee;
+      if (body.status === 'checked_in') {
+        show('ok', `Welcome, ${a.name}`, [[[a.line2, a.line3].filter(Boolean).join(', ')], [`Pass ${a.passCode}`, 'sub']]);
+        addReprint(a);
+        if ($('autoPrint').checked) printTag(a);
+      } else if (body.status === 'already') {
+        const t = new Date(body.checkedInAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        show('warn', 'Already checked in', [[[a.name, a.line3 || a.line2].filter(Boolean).join(', ')], [`This pass was used at ${t}. Check their ID before letting them in.`, 'sub']]);
+        addReprint(a);
+      } else if (body.status === 'other_event') {
+        show('bad', 'Wrong event', [[body.message], ['Direct the attendee to the right registration desk.', 'sub']]);
+      } else {
+        show('bad', 'Not a valid pass', [[body.message || 'This code is not registered for this event.'], ['Ask the attendee to show the email they received, or register them again.', 'sub']]);
+      }
+    } catch {
+      show('bad', 'No connection', [['The check-in server could not be reached. Try again.']]);
+    } finally {
+      busy = false;
+      refocus();
+      if (queued) { const next = queued; queued = null; checkIn(next); }
+    }
+  }
+
+  async function stopCamera() {
+    if (scanner) { try { await scanner.stop(); } catch {} scanner = null; }
+    $('reader').textContent = 'Starting camera…';
+  }
+
+  async function startScanner() {
+    if (mode !== 'camera' || scanner) return;
+    if (!window.Html5Qrcode) { $('reader').textContent = 'The scanner could not load. Use the pass code field below.'; return; }
+    try {
+      scanner = new Html5Qrcode('reader');
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.7); return { width: s, height: s }; } },
+        (text) => {
+          const now = Date.now();
+          if (text === last.text && now - last.at < 4000) return; // same pass still in view
+          last = { text, at: now };
+          checkIn(text);
+        },
+        () => {}
+      );
+    } catch {
+      $('reader').textContent = 'Camera unavailable. Allow camera access and open this page over HTTPS, or type pass codes below.';
+    }
+  }
+
+  async function lock() {
+    pin = '';
+    try { sessionStorage.removeItem(PIN_KEY); } catch {}
+    await stopCamera();
+    $('station').hidden = true;
+    $('pinForm').hidden = false;
+    $('pin').value = '';
+    $('pin').focus();
+  }
+
+  async function unlock(candidate) {
+    const body = await verifyPin(candidate);
+    pin = candidate;
+    try { sessionStorage.setItem(PIN_KEY, pin); } catch {}
+    setCounts(body.counts);
+    $('pinErr').textContent = '';
+    $('pinForm').hidden = true;
+    $('station').hidden = false;
+    setMode(mode);
+  }
+
+  // ---------- barcode scanner (works like a keyboard) ----------
+  let mode = store.get('scanMode') === 'camera' ? 'camera' : 'scanner';
+  const scanInput = $('scanInput');
+  const TOKEN = /^[A-Za-z2-9]{8}\.[A-Za-z0-9_-]{16}$/;
+  let autoTimer = null;
+  let lastScan = { text: '', at: 0 };
+
+  function setMode(m) {
+    mode = m;
+    store.set('scanMode', m);
+    $('modeScanner').setAttribute('aria-pressed', String(m === 'scanner'));
+    $('modeCamera').setAttribute('aria-pressed', String(m === 'camera'));
+    $('scanZone').hidden = m !== 'scanner';
+    $('reader').hidden = m !== 'camera';
+    $('footNote').textContent = m === 'scanner' ? 'Keep this window selected while scanning.' : 'Camera access needs HTTPS (or localhost).';
+    if (m === 'camera') startScanner(); else { stopCamera(); refocus(); }
+  }
+  $('modeScanner').addEventListener('click', () => setMode('scanner'));
+  $('modeCamera').addEventListener('click', () => setMode('camera'));
+
+  function refocus() {
+    if (mode !== 'scanner' || $('station').hidden) return;
+    const a = document.activeElement;
+    // Don't steal focus while staff are typing a code or changing a setting.
+    if (a && a !== scanInput && a !== document.body && a.matches('input, select, textarea')) return;
+    scanInput.focus({ preventScroll: true });
+  }
+  function setReady(ready) {
+    $('scanZone').classList.toggle('ready', ready);
+    $('scanState').textContent = ready ? 'Ready to scan' : 'Click here to start scanning';
+    $('scanHint').textContent = ready
+      ? "Scan the QR code on the attendee's phone or printout."
+      : 'Scanning is paused because this box is not selected.';
+  }
+  scanInput.addEventListener('focus', () => setReady(true));
+  scanInput.addEventListener('blur', () => { setReady(false); setTimeout(refocus, 150); });
+  $('scanZone').addEventListener('click', () => scanInput.focus());
+  window.addEventListener('afterprint', () => setTimeout(refocus, 50));
+  window.addEventListener('focus', () => setTimeout(refocus, 50));
+  document.addEventListener('click', (e) => { if (!e.target.closest('input, select, textarea, button, a, label')) refocus(); });
+
+  function submitScan() {
+    clearTimeout(autoTimer);
+    const text = scanInput.value.trim();
+    scanInput.value = '';
+    if (!text) return;
+    const now = Date.now();
+    if (text === lastScan.text && now - lastScan.at < 3000) return; // accidental double scan
+    lastScan = { text, at: now };
+    checkIn(text);
+  }
+  scanInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); submitScan(); }
+  });
+  // Some scanners don't send Enter at the end: submit once a complete pass has arrived.
+  scanInput.addEventListener('input', () => {
+    clearTimeout(autoTimer);
+    if (TOKEN.test(scanInput.value.trim())) autoTimer = setTimeout(submitScan, 120);
+  });
+
+  $('pinForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try { await unlock($('pin').value.trim()); }
+    catch (err) { $('pinErr').textContent = err.message; }
+  });
+
+  $('manualForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const code = $('code').value.trim();
+    if (!code) return;
+    checkIn(code);
+    $('code').value = '';
+  });
+
+  $('lock').addEventListener('click', lock);
+
+  let saved = '';
+  try { saved = sessionStorage.getItem(PIN_KEY) || ''; } catch {}
+  if (saved) unlock(saved).catch(() => lock());
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Event admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F2F2F2; --surface: #FFFFFF; --surface-2: #F5F5F5; --ink: #141414; --muted: #5C5C5C; --faint: #8C8C8C; --line: #D9D9D9; --grid: #EBEBEB;
+    --cobalt: #E00000; --on-cobalt: #FFFFFF; --series: #E00000; --track: #F8D0D0;
+    --cat-1: #2a78d6; --cat-2: #eb6834; --cat-3: #1baf7a; --cat-4: #eda100; --cat-5: #e87ba4; --cat-6: #008300; --cat-other: #5F6675; --stack-rest: #8C8C8C;
+    --ok: #1E7A4C; --ok-bg: #E2F3EA; --warn: #8A5A00; --warn-bg: #FBF0D6; --error: #B8322A; --info-bg: #E6EEF9; --info: #2A5DA8;
+    --display: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    --body: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light; box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121212; --surface: #1C1C1E; --surface-2: #26262A; --ink: #EDEDED; --muted: #A6A6A6; --faint: #858585; --line: #3A3A3E; --grid: #2C2C30;
+      --cobalt: #FF5C5C; --on-cobalt: #141414; --series: #F24646; --track: #4A2326;
+      --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500; --cat-5: #d55181; --cat-6: #008300; --cat-other: #A9B2C4; --stack-rest: #9A9AA0;
+      --ok: #63C795; --ok-bg: #16352A; --warn: #E9B54A; --warn-bg: #3A2F14; --error: #F08A7E; --info-bg: #1B2940; --info: #8DB4F0;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121212; --surface: #1C1C1E; --surface-2: #26262A; --ink: #EDEDED; --muted: #A6A6A6; --faint: #858585; --line: #3A3A3E; --grid: #2C2C30;
+    --cobalt: #FF5C5C; --on-cobalt: #141414; --series: #F24646; --track: #4A2326;
+    --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500; --cat-5: #d55181; --cat-6: #008300; --cat-other: #A9B2C4; --stack-rest: #9A9AA0;
+    --ok: #63C795; --ok-bg: #16352A; --warn: #E9B54A; --warn-bg: #3A2F14; --error: #F08A7E; --info-bg: #1B2940; --info: #8DB4F0;
+    color-scheme: dark;
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+  html { height: 100%; }
+  body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  a { color: inherit; }
+  .num { font-variant-numeric: tabular-nums; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .powered { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .powered img { display: block; height: 24px; width: auto; }
+  .wrap > .powered { margin-top: 32px; justify-content: center; }
+  .login .powered { justify-content: center; margin-top: 6px; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 40px; padding: .5rem .95rem; border-radius: 10px; border: 1.5px solid transparent; font: 600 .92rem var(--body); cursor: pointer; text-decoration: none; white-space: nowrap; color: var(--ink); background: transparent; }
+  .btn-primary { background: var(--cobalt); color: var(--on-cobalt); }
+  .btn-quiet { background: transparent; color: var(--ink); border-color: var(--line); }
+  .btn-quiet:hover { border-color: var(--muted); }
+  .btn svg { width: 18px; height: 18px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-sm { min-height: 34px; padding: .3rem .7rem; font-size: .85rem; border-radius: 8px; }
+  .btn-danger-text { color: var(--error); }
+  .btn-danger { background: var(--error); color: var(--on-cobalt); }
+  .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+  /* ---------- sign in ---------- */
+  .login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+  .login form { width: min(400px, 100%); background: var(--surface); border-radius: 16px; padding: 32px; display: flex; flex-direction: column; gap: 14px; }
+  .login h1 { font: 800 1.7rem/1.1 var(--display); margin: 0; }
+  .login p { margin: 0; color: var(--muted); }
+  .login label { font-weight: 600; font-size: .92rem; }
+  .login input { width: 100%; font: inherit; color: var(--ink); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 10px; padding: .7rem .8rem; min-height: 46px; }
+  .err { color: var(--error); font-size: .9rem; margin: 0; }
+  .err:empty { display: none; }
+
+  /* ---------- frame ---------- */
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 0 16px 48px; }
+  @media (min-width: 720px) { .wrap { padding: 0 28px 64px; } }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 14px 0; border-bottom: 1.5px solid var(--line); margin-bottom: 24px; }
+  .topbar .brand { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .topbar .brand b { font: 800 1.05rem var(--display); letter-spacing: -.01em; }
+  .mainnav { display: flex; gap: 4px; }
+  .mainnav a { text-decoration: none; font-weight: 600; color: var(--muted); padding: .45rem .75rem; border-radius: 8px; }
+  .mainnav a:hover { color: var(--ink); background: var(--surface); }
+  .mainnav a[aria-current="page"] { color: var(--ink); background: var(--surface); box-shadow: inset 0 -2px 0 var(--cobalt); }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .who { display: inline-flex; align-items: center; gap: .5rem; font-size: .88rem; color: var(--muted); }
+  .who b { color: var(--ink); font-weight: 600; }
+  .role-chip, .chip { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+  .chip.open { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+  .chip.draft { background: var(--info-bg); color: var(--info); border-color: transparent; }
+  .chip.closed { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+  .chip.archived { background: var(--surface-2); color: var(--muted); }
+  .chip.home { background: transparent; }
+
+  .page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  .page-head .kicker { margin: 0; color: var(--muted); font-weight: 600; font-size: .9rem; }
+  .page-head h1 { margin: 2px 0 0; font: 800 clamp(1.5rem, 3vw, 2.1rem)/1.1 var(--display); letter-spacing: -.01em; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .page-head .links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: .9rem; }
+  .page-head .links a { color: var(--muted); text-underline-offset: 2px; }
+  .page-head .links a:hover { color: var(--ink); }
+  .back { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); text-decoration: none; font-weight: 600; font-size: .9rem; }
+  .back:hover { color: var(--ink); }
+  .live { display: inline-flex; align-items: center; gap: .5rem; font-size: .88rem; color: var(--muted); }
+  .live b { color: var(--ink); font-weight: 600; }
+  .live .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+  .live.off .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-bg); }
+
+  .tabs { display: flex; gap: 4px; margin: 0 0 24px; border-bottom: 1.5px solid var(--line); overflow-x: auto; }
+  .tabs a, .tabs button { font: 600 .95rem var(--body); color: var(--muted); background: transparent; border: 0; border-bottom: 3px solid transparent; margin-bottom: -1.5px; padding: .7rem .9rem; min-height: 44px; cursor: pointer; white-space: nowrap; text-decoration: none; display: inline-flex; align-items: center; }
+  .tabs a:hover, .tabs button:hover { color: var(--ink); }
+  .tabs [aria-selected="true"], .tabs [aria-current="page"] { color: var(--ink); border-bottom-color: var(--cobalt); }
+
+  .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border-radius: 16px; padding: 20px 22px; min-width: 0; }
+  .card h2 { margin: 0; font: 600 1.02rem/1.3 var(--body); }
+  .card .sub { margin: 2px 0 0; color: var(--muted); font-size: .88rem; }
+  .span-12 { grid-column: span 12; }
+  .span-7, .span-5, .span-6 { grid-column: span 12; }
+  @media (min-width: 1000px) { .span-7 { grid-column: span 7; } .span-5 { grid-column: span 5; } .span-6 { grid-column: span 6; } }
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+  .empty { margin: 14px 0 0; padding: 32px 16px; text-align: center; color: var(--muted); background: var(--surface-2); border-radius: 12px; }
+  .notice { margin-top: 16px; padding: 14px 16px; border-radius: 12px; background: var(--ok-bg); color: var(--ink); font-size: .92rem; }
+  .notice.warn { background: var(--warn-bg); }
+  .notice.info { background: var(--info-bg); }
+  .notice b { font-weight: 600; }
+  .notice pre { margin: 8px 0; padding: 10px 12px; background: var(--surface); border-radius: 8px; font: 500 .88rem/1.6 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; white-space: pre-wrap; }
+
+  /* ---------- events list ---------- */
+  .ev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+  .ev-card { background: var(--surface); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; border-top: 6px solid var(--ev, var(--cobalt)); }
+  .ev-card .body { padding: 18px 20px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .ev-card .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .ev-card h2 { margin: 0; font: 700 1.12rem/1.25 var(--display); }
+  .ev-card .meta { color: var(--muted); font-size: .88rem; }
+  .ev-card .url { font-size: .86rem; color: var(--muted); overflow-wrap: anywhere; }
+  .ev-card .logo { height: 34px; width: auto; max-width: 120px; object-fit: contain; }
+  .ev-card .counts { display: flex; gap: 18px; margin-top: 4px; }
+  .ev-card .counts div { display: flex; flex-direction: column; }
+  .ev-card .counts b { font: 600 1.35rem/1.1 var(--body); }
+  .ev-card .counts span { color: var(--muted); font-size: .8rem; }
+  .ev-card .foot { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--grid); flex-wrap: wrap; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .home-setting { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: .9rem; color: var(--muted); }
+  .home-setting select { font: inherit; color: var(--ink); background: var(--surface); border: 1.5px solid var(--line); border-radius: 8px; padding: .35rem .5rem; min-height: 38px; }
+
+  /* ---------- forms ---------- */
+  .form-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 16px; }
+  @media (min-width: 900px) { .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  @media (min-width: 560px) { .two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .field label, .field .lbl { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 5px; }
+  .field input[type=text], .field input[type=password], .field input[type=email], .field input[type=number], .field select, .field textarea {
+    width: 100%; font: inherit; color: var(--ink); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 10px; padding: .55rem .7rem; min-height: 44px;
+  }
+  .field textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
+  .field .help { color: var(--muted); font-size: .82rem; margin: 4px 0 0; }
+  .field .warn-text { color: var(--warn); font-size: .82rem; margin: 4px 0 0; font-weight: 600; }
+  .prefix { display: flex; align-items: stretch; border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+  .prefix span { display: flex; align-items: center; padding: 0 .6rem; color: var(--muted); font-size: .88rem; border-right: 1.5px solid var(--line); white-space: nowrap; max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
+  .field .prefix input { border: 0 !important; border-radius: 0 !important; min-width: 0; }
+  .pw-row { display: flex; gap: 8px; }
+  .pw-row input { flex: 1; min-width: 0; font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace !important; }
+  .check { display: flex; align-items: flex-start; gap: .55rem; font-size: .92rem; cursor: pointer; }
+  .check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--cobalt); flex: none; }
+  .checks { display: flex; flex-direction: column; gap: 8px; }
+  .form-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+  .seg { display: inline-flex; border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; flex-wrap: wrap; }
+  .seg button { font: 600 .88rem var(--body); color: var(--ink); background: transparent; border: 0; padding: .55rem .85rem; min-height: 40px; cursor: pointer; }
+  .seg button + button { border-left: 1.5px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--cobalt); color: var(--on-cobalt); }
+
+  /* ---------- settings editor ---------- */
+  .settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (min-width: 1100px) { .settings { grid-template-columns: minmax(0, 600px) minmax(0, 1fr); } }
+  .sec-nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .sec-nav button { font: 600 .9rem var(--body); color: var(--ink); background: var(--surface); border: 1.5px solid var(--line); border-radius: 999px; padding: .4rem .9rem; min-height: 38px; cursor: pointer; }
+  .sec-nav button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+  .sec { display: flex; flex-direction: column; gap: 16px; }
+  .sec h3 { margin: 0 0 2px; font: 700 .98rem var(--body); }
+  .sec .card > .sub:first-child { margin-top: 0; }
+  .status-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .status-pick label { display: flex; gap: .55rem; align-items: flex-start; border: 1.5px solid var(--line); border-radius: 10px; padding: .6rem .7rem; cursor: pointer; font-size: .88rem; color: var(--muted); }
+  .status-pick label b { display: block; color: var(--ink); font-size: .92rem; }
+  .status-pick input { accent-color: var(--cobalt); margin-top: 3px; }
+  .status-pick label:has(input:checked) { border-color: var(--ink); }
+  .logo-box { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .logo-prev { width: 180px; height: 84px; border-radius: 10px; background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; border: 1.5px dashed var(--line); display: grid; place-items: center; color: var(--muted); font-size: .82rem; overflow: hidden; }
+  .logo-prev img { max-width: 160px; max-height: 70px; display: block; }
+  .color-row { display: flex; align-items: center; gap: 10px; }
+  .color-row input[type=color] { width: 46px; height: 44px; border: 1.5px solid var(--line); border-radius: 10px; padding: 3px; background: var(--surface-2); cursor: pointer; flex: none; }
+  .color-row input[type=text] { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace !important; text-transform: uppercase; }
+  .font-sample { margin-top: 6px; font-size: 1.05rem; color: var(--ink); }
+
+  .fields-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .frow { border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); }
+  .frow.off { opacity: .62; }
+  .frow .fhead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; }
+  .frow .order { display: flex; flex-direction: column; }
+  .frow .order button { width: 28px; height: 20px; border: 0; background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; border-radius: 4px; }
+  .frow .order button:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+  .frow .order button:disabled { opacity: .3; cursor: default; }
+  .frow .order svg { width: 14px; height: 14px; }
+  .frow .ftitle { min-width: 0; }
+  .frow .ftitle b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .ftitle span { color: var(--muted); font-size: .82rem; }
+  .frow .fctl { display: flex; align-items: center; gap: 6px; }
+  .frow .fedit { padding: 4px 14px 14px; border-top: 1px solid var(--grid); display: flex; flex-direction: column; gap: 12px; }
+  .switch { position: relative; display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--muted); cursor: pointer; }
+  .switch input { appearance: none; width: 36px; height: 22px; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; margin: 0; transition: background .15s; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch input:checked { background: var(--ok); }
+  .switch input:checked::after { transform: translateX(14px); }
+  .switch input:disabled { opacity: .5; cursor: not-allowed; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { font: 600 .8rem ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; cursor: pointer; }
+
+  .preview-pane { position: sticky; top: 12px; background: var(--surface); border-radius: 16px; padding: 14px; min-width: 0; }
+  .preview-pane .ptabs { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .frame-box { position: relative; width: 100%; overflow: hidden; border-radius: 10px; border: 1px solid var(--grid); background: var(--bg); }
+  .frame-box iframe { border: 0; display: block; transform-origin: 0 0; background: #fff; }
+  .frame-box.phone { display: flex; justify-content: center; padding: 14px 0; background: var(--surface-2); }
+  .frame-box.phone iframe { border-radius: 22px; box-shadow: 0 0 0 8px #222; transform: none; }
+  .subject-line { font-size: .9rem; color: var(--muted); margin: 0 0 8px; overflow-wrap: anywhere; }
+  .subject-line b { color: var(--ink); }
+  .tag-stage { background: var(--surface-2); border-radius: 10px; padding: 24px; display: grid; place-items: center; }
+  .tag-prev { width: min(100%, 420px); aspect-ratio: 4 / 3; background: #fff; color: #000; border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.18); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 6% 7% 11%; position: relative; container-type: size; font-family: var(--tag-font, var(--display)); }
+  .tag-prev img.t-logo { max-height: 14cqh; max-width: 60%; margin-bottom: 3cqh; }
+  .tag-prev .t-ev { font: 700 5cqh/1.2 var(--tag-body, var(--body)); text-transform: uppercase; letter-spacing: .06em; padding-bottom: .45em; margin-bottom: .7em; border-bottom: 1.5px solid #000; }
+  .tag-prev .t-nm { font-weight: 800; font-size: 15.5cqh; line-height: 1.02; overflow-wrap: anywhere; }
+  .tag-prev .t-ds { font: 600 8.5cqh/1.2 var(--tag-body, var(--body)); margin-top: .55em; }
+  .tag-prev .t-co { font: 400 8cqh/1.2 var(--tag-body, var(--body)); margin-top: .15em; }
+  .tag-prev .t-pw { position: absolute; left: 0; right: 0; bottom: 3.5%; display: flex; align-items: center; justify-content: center; gap: .45em; font: 400 3.4cqh/1 var(--body); color: #555; }
+  .tag-prev .t-pw img { height: 6.2cqh; }
+
+  .savebar { position: sticky; bottom: 0; z-index: 5; margin-top: 18px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-radius: 14px; background: var(--ink); color: var(--surface); box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+  .savebar .btn-quiet { color: var(--surface); border-color: color-mix(in srgb, var(--surface) 40%, transparent); }
+  .savebar .err { color: #FFB4AA; }
+
+  /* ---------- dashboard ---------- */
+  .an-bar { grid-column: span 12; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 16px; }
+  .an-bar h2 { margin: 0; font: 800 1.45rem/1.15 var(--display); }
+  .an-bar p { margin: 2px 0 0; color: var(--muted); }
+  .an-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .an-actions { display: flex; gap: 4px; flex: none; }
+  .icon-btn { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; border: 1.5px solid transparent; background: transparent; color: var(--muted); cursor: pointer; }
+  .icon-btn:hover { border-color: var(--line); color: var(--ink); }
+  .icon-btn:disabled { opacity: .4; cursor: default; }
+  .icon-btn svg { width: 19px; height: 19px; }
+  .an-more { margin: 6px 0 0; color: var(--muted); font-size: .85rem; }
+  .an-more:empty { display: none; }
+  #anBuilder { grid-column: span 12; }
+  .builder { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  @media (min-width: 1000px) { .builder { grid-template-columns: 360px minmax(0, 1fr); gap: 32px; } }
+  .builder form { display: flex; flex-direction: column; gap: 14px; }
+  .builder label, .builder .lbl { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 5px; }
+  .builder select, .builder input[type=text] { width: 100%; font: inherit; color: var(--ink); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 10px; padding: .55rem .7rem; min-height: 44px; }
+  .builder select:disabled { opacity: .7; }
+  .types { display: flex; flex-wrap: wrap; gap: 8px; }
+  .type-btn { display: inline-flex; align-items: center; gap: .4rem; min-height: 42px; padding: .45rem .8rem; border-radius: 10px; border: 1.5px solid var(--line); background: transparent; color: var(--ink); font: 600 .9rem var(--body); cursor: pointer; }
+  .type-btn svg { width: 18px; height: 18px; }
+  .type-btn[aria-pressed="true"] { background: var(--cobalt); border-color: var(--cobalt); color: var(--on-cobalt); }
+  .hint { color: var(--muted); font-size: .85rem; margin: 6px 0 0; }
+  .hint:empty { display: none; }
+  .builder .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .preview-box { background: var(--surface-2); border-radius: 12px; padding: 16px; min-width: 0; }
+  .preview-box .lbl { color: var(--muted); }
+  .preview-box .chart { margin-top: 6px; }
+
+  .hero { display: flex; flex-direction: column; gap: 14px; }
+  .hero .label { font-weight: 600; color: var(--muted); }
+  .hero .big { font: 600 clamp(3.2rem, 7vw, 4.6rem)/1 var(--body); letter-spacing: -.02em; }
+  .hero .of { color: var(--muted); font-size: 1.05rem; }
+  .hero .of b { color: var(--ink); }
+  .meter { height: 14px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .meter span { display: block; height: 100%; background: var(--series); border-radius: 999px; transition: width .6s ease; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .tile { background: var(--surface); border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
+  .tile .label { color: var(--muted); font-weight: 600; font-size: .92rem; }
+  .tile .value { font: 600 2.1rem/1.1 var(--body); }
+  .tile .note { color: var(--muted); font-size: .86rem; display: flex; align-items: center; gap: .35rem; }
+  .tile.warn .note { color: var(--warn); font-weight: 600; }
+  .tile .note svg { width: 16px; height: 16px; flex: none; }
+
+  .chart { position: relative; margin-top: 14px; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart .axis { fill: var(--muted); font: 12px var(--body); font-variant-numeric: tabular-nums; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+  .chart .baseline { stroke: var(--line); stroke-width: 1; shape-rendering: crispEdges; }
+  .chart .bar { fill: var(--series); }
+  .chart .hit { fill: transparent; cursor: default; }
+  .chart .hit:hover + .bar, .chart .bar.on { opacity: .82; }
+  .chart .peak { fill: var(--ink); font: 600 12px var(--body); font-variant-numeric: tabular-nums; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); font-size: .84rem; line-height: 1.35; padding: 7px 10px; border-radius: 8px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); z-index: 2; }
+  .tip b { font-weight: 600; }
+  details.data { margin-top: 10px; font-size: .88rem; }
+  details.data summary { cursor: pointer; color: var(--muted); }
+  details.data table { margin-top: 8px; border-collapse: collapse; width: 100%; max-width: 420px; }
+  details.data td, details.data th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+  details.data td:last-child, details.data th:last-child { text-align: right; }
+
+  .bars { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .bars li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+  .bars .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bars .count { color: var(--muted); font-size: .88rem; text-align: right; }
+  .bars .track { grid-column: 1 / -1; height: 12px; }
+  .bars .fill { height: 12px; background: var(--series); border-radius: 0 4px 4px 0; min-width: 4px; }
+
+  .feed { list-style: none; margin: 12px 0 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--grid); }
+  .feed li:last-child { border-bottom: 0; }
+  .feed .ico { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; }
+  .feed .ico svg { width: 17px; height: 17px; }
+  .feed .ico.in { background: var(--ok-bg); color: var(--ok); }
+  .feed .ico.reg { background: var(--track); color: var(--cobalt); }
+  .feed .what { min-width: 0; }
+  .feed .what b { font-weight: 600; }
+  .feed .what span { display: block; color: var(--muted); font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed time { color: var(--muted); font-size: .84rem; white-space: nowrap; }
+  .feed li.fresh { animation: fresh 2.4s ease-out; }
+  @keyframes fresh { from { background: var(--track); } to { background: transparent; } }
+
+  .table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
+  .search { flex: 1 1 260px; position: relative; }
+  .search input { width: 100%; font: inherit; color: var(--ink); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 10px; padding: .6rem .8rem .6rem 2.4rem; min-height: 42px; }
+  .search svg { position: absolute; left: .8rem; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--muted); }
+  .showing { color: var(--muted); font-size: .88rem; }
+  .table-box { position: relative; overflow-x: auto; margin-top: 12px; border: 1px solid var(--grid); border-radius: 12px; }
+  table.people, table.list { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  table.people { min-width: 860px; }
+  table.list { min-width: 720px; }
+  table.people th, table.list th { text-align: left; font-weight: 600; color: var(--muted); background: var(--surface-2); padding: 10px 12px; white-space: nowrap; }
+  table.people td, table.list td { padding: 10px 12px; border-top: 1px solid var(--grid); vertical-align: top; }
+  table.list td { vertical-align: middle; }
+  table.people tbody tr { cursor: pointer; }
+  table.people tbody tr:hover td { background: var(--surface-2); }
+  td .small { display: block; color: var(--muted); font-size: .84rem; }
+  .badge { display: inline-flex; align-items: center; gap: .3rem; font-weight: 600; font-size: .84rem; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .badge svg { width: 14px; height: 14px; }
+  .badge.in { background: var(--ok-bg); color: var(--ok); }
+  .badge.out { background: var(--surface-2); color: var(--muted); }
+  .badge.off { background: var(--warn-bg); color: var(--warn); }
+  .more { margin-top: 12px; display: flex; justify-content: center; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .danger-card { border: 1.5px solid var(--line); }
+  .danger-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 0; border-top: 1px solid var(--grid); }
+  .danger-row:first-of-type { border-top: 0; }
+  .danger-row h3 { margin: 0; font: 600 .98rem var(--body); }
+  .danger-row p { margin: 2px 0 0; color: var(--muted); font-size: .88rem; max-width: 640px; }
+  dl.answers { display: grid; grid-template-columns: minmax(0, 40%) minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: .92rem; }
+  dl.answers dt { color: var(--muted); }
+  dl.answers dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; white-space: pre-line; }
+
+  dialog.dlg { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 48px); border: 0; border-radius: 16px; padding: 0; background: var(--surface); color: var(--ink); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+  dialog.dlg::backdrop { background: rgba(0,0,0,.45); }
+  dialog.dlg form { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  dialog.dlg h2 { margin: 0; font: 700 1.2rem/1.25 var(--display); }
+  dialog.dlg .body { color: var(--muted); font-size: .93rem; }
+  dialog.dlg .body p { margin: 0 0 8px; }
+  dialog.dlg .body b { color: var(--ink); }
+  dialog.dlg .foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+  [data-role="client"] #anAdd, [data-role="client"] [data-act="remove"] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+
+<!-- Sign in -->
+<main class="login" id="loginView" hidden>
+  <form id="loginForm">
+    <h1>Event admin</h1>
+    <p>Sign in to manage your events or view your event dashboard.</p>
+    <label for="user">Username</label>
+    <input id="user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="key">Password</label>
+    <input id="key" type="password" autocomplete="current-password" required>
+    <p class="err" id="loginErr" role="alert"></p>
+    <button class="btn btn-primary" type="submit">Sign in</button>
+    <footer class="powered">
+      <span>Powered by</span>
+      <picture><source srcset="/jupiter-logo-light.png" media="(prefers-color-scheme: dark)"><img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24"></picture>
+    </footer>
+  </form>
+</main>
+
+<div class="wrap" id="appView" hidden>
+  <header class="topbar">
+    <div class="brand">
+      <b>Event admin</b>
+      <nav class="mainnav" id="mainnav" aria-label="Admin sections">
+        <a href="#/" data-nav="events">Events</a>
+        <a href="#/users" data-nav="users" data-owner>Users</a>
+      </nav>
+    </div>
+    <div class="actions">
+      <span class="who"><span>Signed in as <b id="whoName"></b></span><span class="role-chip" id="whoRole"></span></span>
+      <button class="btn btn-quiet btn-sm" id="myPw" type="button" hidden>Change password</button>
+      <button class="btn btn-quiet btn-sm" id="signOut" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <!-- Events list -->
+  <section id="vEvents" hidden>
+    <div class="page-head">
+      <div><p class="kicker" id="evKicker">All events</p><h1>Events</h1></div>
+      <button class="btn btn-primary" id="newEvent" type="button" data-owner>
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New event
+      </button>
+    </div>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Show events">
+        <button type="button" data-evf="active" aria-pressed="true">Active</button>
+        <button type="button" data-evf="archived" aria-pressed="false">Archived</button>
+      </div>
+      <label class="home-setting" data-owner>
+        <span><span id="hostLabel"></span> opens</span>
+        <select id="homeEvent"></select>
+      </label>
+    </div>
+    <div class="ev-grid" id="evGrid"></div>
+  </section>
+
+  <!-- Users -->
+  <section id="vUsers" class="stack" hidden>
+    <div class="page-head"><div><p class="kicker">Client access</p><h1>Users</h1></div></div>
+    <section class="card" aria-labelledby="newUserTitle">
+      <h2 id="newUserTitle">Add a client user</h2>
+      <p class="sub">Client users can sign in and view the dashboards of the events you choose. They can't change settings, add charts, manage users, or reset or delete records.</p>
+      <form id="userForm" novalidate>
+        <div class="form-grid three">
+          <div class="field"><label for="uName">Name</label><input id="uName" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Maria Santos"></div>
+          <div class="field"><label for="uUser">Username</label><input id="uUser" type="text" maxlength="60" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. maria@company.com"><p class="help">Letters, numbers, dots or @. No spaces.</p></div>
+          <div class="field"><label for="uPw">Password</label><div class="pw-row"><input id="uPw" type="text" maxlength="128" autocomplete="off" spellcheck="false"><button class="btn btn-quiet" type="button" id="uGen">Generate</button></div><p class="help">At least 8 characters. They can change it after signing in.</p></div>
+        </div>
+        <div class="field" style="margin-top:14px"><span class="lbl">Events this user can view</span><div class="checks" id="uEvents"></div></div>
+        <div class="form-foot">
+          <label class="check"><input type="checkbox" id="uExport" checked> Can download the attendee list (Excel)</label>
+          <button class="btn btn-primary" type="submit">Add user</button>
+        </div>
+        <p class="err" id="uErr" role="alert"></p>
+      </form>
+      <div class="notice" id="uDone" hidden></div>
+    </section>
+    <section class="card" aria-labelledby="usersTitle">
+      <h2 id="usersTitle">Client users</h2>
+      <p class="sub">Turning a user off or resetting their password signs them out immediately.</p>
+      <div class="table-box">
+        <table class="list">
+          <thead><tr><th scope="col">Name</th><th scope="col">Events</th><th scope="col">Download</th><th scope="col">Status</th><th scope="col">Last sign-in</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- One event -->
+  <section id="vEvent" hidden>
+    <div class="page-head">
+      <div>
+        <a class="back" href="#/" id="backLink">‹ All events</a>
+        <h1><span id="evTitle">Event</span> <span class="chip" id="evStatus"></span></h1>
+        <div class="links" id="evLinks"></div>
+      </div>
+      <span class="live" id="live" role="status"><span class="dot" aria-hidden="true"></span><span><b id="liveText">Live</b> <span id="updated"></span></span></span>
+    </div>
+    <nav class="tabs" id="evTabs" aria-label="Event sections">
+      <a data-tab="dash">Dashboard</a>
+      <a data-tab="settings" data-owner>Settings</a>
+      <a data-tab="data" data-owner>Backup &amp; reset</a>
+    </nav>
+
+    <!-- Dashboard -->
+    <div id="tDash">
+      <div class="toolbar" style="justify-content:flex-end;margin-top:-8px">
+        <a class="btn btn-quiet" id="csvBtn" download>
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>
+          Download attendee list
+        </a>
+      </div>
+      <div class="grid">
+        <section class="card hero span-5" aria-labelledby="heroLabel">
+          <span class="label" id="heroLabel">Checked in</span>
+          <span class="big num" id="hIn">0</span>
+          <span class="of">of <b class="num" id="hReg">0</b> registered, <b class="num" id="hPct">0%</b> attendance</span>
+          <div class="meter" role="img" id="meter" aria-label="0% of registered attendees have checked in"><span id="meterFill" style="width:0%"></span></div>
+        </section>
+        <div class="tiles span-7">
+          <section class="tile"><span class="label">Registered</span><span class="value num" id="tReg">0</span><span class="note" id="tRegNote">&nbsp;</span></section>
+          <section class="tile"><span class="label">Not yet arrived</span><span class="value num" id="tOut">0</span><span class="note">Registered but not checked in</span></section>
+          <section class="tile" id="coTile"><span class="label">Companies</span><span class="value num" id="tCo">0</span><span class="note">Different companies registered</span></section>
+          <section class="tile" id="emailTile"><span class="label">Pass emails not delivered</span><span class="value num" id="tMail">0</span><span class="note" id="tMailNote">All passes were emailed</span></section>
+        </div>
+        <section class="card span-7" aria-labelledby="regTitle">
+          <h2 id="regTitle">Registrations per day</h2>
+          <p class="sub" id="regSub">New sign-ups each day</p>
+          <div class="chart" id="regChart"></div>
+          <details class="data"><summary>Show data</summary><table id="regTable"></table></details>
+        </section>
+        <section class="card span-5" aria-labelledby="feedTitle">
+          <h2 id="feedTitle">Latest activity</h2>
+          <p class="sub">Updates the moment someone registers or checks in</p>
+          <ul class="feed" id="feed" aria-live="polite"></ul>
+        </section>
+        <section class="card span-7" id="arrCard" aria-labelledby="arrTitle">
+          <h2 id="arrTitle">Arrivals on event day</h2>
+          <p class="sub" id="arrSub">Check-ins every 15 minutes</p>
+          <div class="chart" id="arrChart"></div>
+          <details class="data" id="arrData"><summary>Show data</summary><table id="arrTable"></table></details>
+        </section>
+        <section class="card span-5" id="coCard" aria-labelledby="coTitle">
+          <h2 id="coTitle">Top companies</h2>
+          <p class="sub">By number of registrants</p>
+          <ul class="bars" id="companies"></ul>
+        </section>
+
+        <div class="an-bar">
+          <div><h2 id="anTitleHead">Analysis</h2><p id="anIntro">Charts you add here are saved for everyone who views this event and update live.</p></div>
+          <button class="btn btn-primary" id="anAdd" type="button" aria-expanded="false" aria-controls="anBuilder">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add a chart
+          </button>
+        </div>
+        <section class="card" id="anBuilder" hidden aria-label="New chart">
+          <div class="builder">
+            <form id="anForm">
+              <div><label for="anDim">Analyse</label><select id="anDim"></select></div>
+              <div><label for="anMetric">Measure</label><select id="anMetric"></select></div>
+              <div id="anFilterWrap"><label for="anFilter">Include</label><select id="anFilter"></select></div>
+              <div><span class="lbl" id="anTypeLbl">Show as</span><div class="types" id="anTypes" role="group" aria-labelledby="anTypeLbl"></div><p class="hint" id="anHint"></p></div>
+              <div><label for="anTitle">Title</label><input type="text" id="anTitle" maxlength="80"></div>
+              <p class="err" id="anErr" role="alert"></p>
+              <div class="row"><button class="btn btn-primary" type="submit">Add to dashboard</button><button class="btn btn-quiet" type="button" id="anCancel">Cancel</button></div>
+            </form>
+            <div class="preview-box"><span class="lbl">Preview</span><div class="chart" id="anPreview"></div></div>
+          </div>
+        </section>
+        <div class="span-12 grid" id="anGrid" style="grid-column: span 12"></div>
+        <p class="empty span-12" id="anEmpty" hidden>No charts yet. Use “Add a chart” to build one.</p>
+
+        <section class="card span-12" aria-labelledby="peopleTitle">
+          <h2 id="peopleTitle">Attendees</h2>
+          <p class="sub">Select a row to see all of that person’s answers.</p>
+          <div class="table-tools">
+            <div class="search">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="q" type="search" placeholder="Search names, answers, email or pass code" aria-label="Search attendees">
+            </div>
+            <div class="seg" role="group" aria-label="Filter by status" id="peopleSeg">
+              <button type="button" data-f="all" aria-pressed="true">All</button>
+              <button type="button" data-f="in" aria-pressed="false">Checked in</button>
+              <button type="button" data-f="out" aria-pressed="false">Not arrived</button>
+            </div>
+            <span class="showing" id="showing" role="status"></span>
+          </div>
+          <div class="table-box">
+            <table class="people">
+              <thead id="peopleHead"></thead>
+              <tbody id="rows"></tbody>
+            </table>
+          </div>
+          <div class="more"><button class="btn btn-quiet" id="moreBtn" type="button" hidden>Show more</button></div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Settings (filled by admin-settings.js) -->
+    <div id="tSettings" hidden></div>
+
+    <!-- Backup & reset -->
+    <div id="tData" class="stack" hidden>
+      <div class="notice" id="dataDone" hidden role="status"></div>
+      <section class="card danger-card" aria-labelledby="resetTitle">
+        <h2 id="resetTitle">Reset or delete records</h2>
+        <p class="sub">A backup is created automatically before anything is changed, so you can restore it below. Only this event is affected.</p>
+        <div class="danger-row">
+          <div><h3>Reset check-ins</h3><p>Marks everyone as not arrived but keeps all registrations and passes. Use this after a rehearsal or a test run of the check-in desks.</p></div>
+          <button class="btn btn-quiet" type="button" id="resetBtn">Reset check-ins…</button>
+        </div>
+        <div class="danger-row">
+          <div><h3>Delete all records</h3><p>Removes every registration and check-in for this event. Passes already emailed stop working, and people would need to register again.</p></div>
+          <button class="btn btn-quiet btn-danger-text" type="button" id="deleteBtn">Delete all records…</button>
+        </div>
+      </section>
+      <section class="card" aria-labelledby="backupsTitle">
+        <div class="an-head">
+          <div><h2 id="backupsTitle">Backups</h2><p class="sub">Download a backup as an Excel file, or restore it to bring those records back.</p></div>
+          <button class="btn btn-primary" type="button" id="backupNow">Back up now</button>
+        </div>
+        <div class="table-box">
+          <table class="list">
+            <thead><tr><th scope="col">Created</th><th scope="col">Reason</th><th scope="col">Records</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+            <tbody id="backupRows"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card danger-card" aria-labelledby="evDangerTitle">
+        <h2 id="evDangerTitle">Archive or delete this event</h2>
+        <div class="danger-row">
+          <div><h3 id="archTitle">Archive event</h3><p id="archText">Closes registration and check-in and moves the event to the Archived list. Records, dashboard and backups are kept.</p></div>
+          <button class="btn btn-quiet" type="button" id="archiveBtn">Archive…</button>
+        </div>
+        <div class="danger-row">
+          <div><h3>Delete event</h3><p>Only possible when the event has no registrations, for example one created by mistake.</p></div>
+          <button class="btn btn-quiet btn-danger-text" type="button" id="deleteEventBtn">Delete event…</button>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <footer class="powered">
+    <span>Powered by</span>
+    <picture><source srcset="/jupiter-logo-light.png" media="(prefers-color-scheme: dark)"><img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24"></picture>
+  </footer>
+</div>
+
+<dialog class="dlg" id="dlg">
+  <form method="dialog" id="dlgForm" novalidate>
+    <h2 id="dlgTitle"></h2>
+    <div class="body" id="dlgBody"></div>
+    <div id="dlgFields"></div>
+    <p class="err" id="dlgErr" role="alert"></p>
+    <div class="foot"><button class="btn btn-quiet" type="button" id="dlgCancel">Cancel</button><button class="btn btn-primary" type="submit" id="dlgOk">OK</button></div>
+  </form>
+</dialog>
+
+<script src="/shared.js"></script>
+<script src="/analysis.js"></script>
+<script src="/admin.js"></script>
+<script src="/admin-settings.js"></script>
+</body>
+</html>

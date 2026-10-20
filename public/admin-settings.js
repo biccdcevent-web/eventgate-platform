@@ -1,0 +1,564 @@
+/* Event settings editor: details, branding, registration form, email and name tag,
+   with a live preview of the registration page, the pass email and the printed name tag. */
+(() => {
+  'use strict';
+  const A = window.App;
+  const { $, esc } = A;
+  const root = $('tSettings');
+
+  let ev = null;            // the saved event
+  let draft = null;         // { slug, status, staffPin, config } being edited
+  let saved = '';           // JSON of the saved state, to detect changes
+  let onSaved = null;
+  let section = 'details';
+  let pview = 'page';
+  let device = 'desktop';
+  let openKey = null;       // field whose editor is expanded
+  let platform = { senderAddress: '', smtp: true };
+
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  const isDirty = () => Boolean(draft) && JSON.stringify(draft) !== saved;
+  const getPath = (path) => path.split('.').reduce((o, k) => (o == null ? o : o[k]), draft);
+  function setPath(path, value) {
+    const keys = path.split('.');
+    let o = draft;
+    for (const k of keys.slice(0, -1)) o = o[k];
+    o[keys[keys.length - 1]] = value;
+  }
+  const fieldTypeLabel = (t) => EG.FIELD_TYPES[t] || t;
+
+  // ------------------------------------------------------------ open / close
+  async function open(e, opts = {}) {
+    onSaved = opts.onSaved;
+    root.hidden = false;
+    if (ev && ev.id === e.id && draft) return;
+    ev = e;
+    draft = clone({ slug: e.slug, status: e.status, staffPin: e.staffPin, config: e.config });
+    saved = JSON.stringify(draft);
+    openKey = null;
+    A.setLeaveGuard(guard);
+    try { platform = await A.api('/api/admin/platform'); } catch {}
+    build();
+  }
+  function close() {
+    root.hidden = true;
+    if (!ev) return;
+    ev = null; draft = null; saved = '';
+    root.innerHTML = '';
+    A.setLeaveGuard(null);
+  }
+  function guard(silent) {
+    if (!isDirty()) return true;
+    if (silent) return false;
+    return confirm('You have unsaved changes to this event’s settings. Leave without saving?');
+  }
+
+  // ------------------------------------------------------------ layout
+  const SECTIONS = [['details', 'Details'], ['branding', 'Branding'], ['form', 'Registration form'], ['email', 'Email'], ['tag', 'Name tag']];
+  function build() {
+    root.innerHTML = `
+      <div class="settings">
+        <div>
+          <div class="sec-nav" role="group" aria-label="Settings sections">
+            ${SECTIONS.map(([k, l]) => `<button type="button" data-sec="${k}" aria-pressed="${k === section}">${l}</button>`).join('')}
+          </div>
+          <div class="sec" id="secBody"></div>
+        </div>
+        <aside class="preview-pane" aria-label="Preview">
+          <div class="ptabs">
+            <div class="seg" role="group" aria-label="What to preview">
+              <button type="button" data-pv="page">Registration page</button><button type="button" data-pv="email">Email</button><button type="button" data-pv="tag">Name tag</button>
+            </div>
+            <div class="seg" role="group" aria-label="Screen size" id="devSeg">
+              <button type="button" data-dev="desktop">Computer</button><button type="button" data-dev="phone">Phone</button>
+            </div>
+          </div>
+          <div id="pvPage"><div class="frame-box" id="pageBox"><iframe id="pageFrame" title="Registration page preview"></iframe></div></div>
+          <div id="pvEmail" hidden><p class="subject-line" id="pvSubject"></p><div class="frame-box"><iframe id="emailFrame" title="Email preview" style="width:100%;height:900px"></iframe></div></div>
+          <div id="pvTag" hidden><div class="tag-stage"><div class="tag-prev" id="tagPrev"></div></div><p class="hint" style="text-align:center">Shown at 4 × 3 in. Other label sizes are chosen at the check-in desk.</p></div>
+        </aside>
+      </div>
+      <div class="savebar" id="saveBar" hidden>
+        <span><b>Unsaved changes</b> <span class="err" id="saveErr" role="alert"></span></span>
+        <span class="actions"><button class="btn btn-quiet btn-sm" type="button" id="discard">Discard</button><button class="btn btn-primary" type="button" id="saveBtn">Save changes</button></span>
+      </div>`;
+    root.querySelectorAll('[data-sec]').forEach((b) => b.addEventListener('click', () => showSection(b.dataset.sec)));
+    root.querySelectorAll('[data-pv]').forEach((b) => b.addEventListener('click', () => showPreview(b.dataset.pv)));
+    root.querySelectorAll('[data-dev]').forEach((b) => b.addEventListener('click', () => { device = b.dataset.dev; sizeFrame(); syncPvButtons(); }));
+    $('discard').addEventListener('click', () => { draft = JSON.parse(saved); openKey = null; renderSection(); changed(); });
+    $('saveBtn').addEventListener('click', save);
+    $('pageFrame').src = `/${encodeURIComponent(ev.slug)}?preview=1`;
+    $('pageFrame').addEventListener('load', () => { sizeFrame(); postPage(); });
+    showSection(section);
+  }
+  function showSection(k) {
+    section = k;
+    root.querySelectorAll('[data-sec]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sec === k)));
+    renderSection();
+    showPreview(k === 'email' ? 'email' : k === 'tag' ? 'tag' : 'page');
+  }
+  function syncPvButtons() {
+    root.querySelectorAll('[data-pv]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pv === pview)));
+    root.querySelectorAll('[data-dev]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.dev === device)));
+    $('devSeg').hidden = pview !== 'page';
+  }
+  function showPreview(k) {
+    pview = k;
+    $('pvPage').hidden = k !== 'page';
+    $('pvEmail').hidden = k !== 'email';
+    $('pvTag').hidden = k !== 'tag';
+    syncPvButtons();
+    if (k === 'page') sizeFrame();
+    if (k === 'email') updateEmail(true);
+    if (k === 'tag') renderTag();
+  }
+
+  // ------------------------------------------------------------ previews
+  function toPublic() {
+    const c = draft.config;
+    return {
+      slug: draft.slug, status: draft.status === 'draft' ? 'open' : draft.status, full: false,
+      details: { name: c.details.name, date: c.details.date, venue: c.details.venue, organizer: c.details.organizer, intro: c.details.intro },
+      branding: c.branding,
+      form: { fields: c.form.fields.filter((f) => f.enabled), consent: c.form.consent, submitLabel: c.form.submitLabel, successTitle: c.form.successTitle, closedMessage: c.form.closedMessage },
+      badge: c.badge,
+    };
+  }
+  function postPage() {
+    const f = $('pageFrame');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'eg-preview', event: toPublic() }, location.origin);
+  }
+  window.addEventListener('message', (e) => { if (e.origin === location.origin && e.data && e.data.type === 'eg-preview-ready' && draft) postPage(); });
+  function sizeFrame() {
+    const box = $('pageBox'), f = $('pageFrame');
+    if (!box || !f || $('pvPage').hidden) return;
+    box.classList.toggle('phone', device === 'phone');
+    if (device === 'phone') {
+      Object.assign(f.style, { width: '375px', height: '720px', transform: 'none' });
+      box.style.height = '';
+    } else {
+      const W = box.clientWidth || 600, FW = 1280, FH = 1500, k = W / FW;
+      Object.assign(f.style, { width: `${FW}px`, height: `${FH}px`, transform: `scale(${k})` });
+      box.style.height = `${Math.round(FH * k)}px`;
+    }
+  }
+  window.addEventListener('resize', () => { if (draft) sizeFrame(); });
+
+  let emailTimer = null, emailSeq = 0;
+  function updateEmail(now) {
+    clearTimeout(emailTimer);
+    emailTimer = setTimeout(async () => {
+      if (!draft || pview !== 'email') return;
+      const seq = ++emailSeq;
+      try {
+        const r = await A.post(`/api/admin/events/${ev.id}/email-preview`, { config: draft.config });
+        if (seq !== emailSeq) return;
+        $('pvSubject').innerHTML = `Subject: <b>${esc(r.subject)}</b><br>From: <b>${esc(draft.config.email.fromName || draft.config.details.name)}</b> &lt;${esc(platform.senderAddress)}&gt;${draft.config.email.replyTo ? ` · Replies go to ${esc(draft.config.email.replyTo)}` : ''}`;
+        const f = $('emailFrame');
+        f.onload = () => { try { f.style.height = `${f.contentDocument.documentElement.scrollHeight + 4}px`; } catch {} };
+        f.srcdoc = r.html;
+      } catch {}
+    }, now ? 0 : 600);
+  }
+
+  function renderTag() {
+    const c = draft.config, b = c.badge;
+    const label = (k) => (c.form.fields.find((f) => f.key === k) || {}).label || '';
+    const sample = { designation: 'Operations Manager', company_name: 'Sample Company Inc.' };
+    const val = (k) => (k ? sample[k] || `(${label(k)})` : '');
+    const box = $('tagPrev');
+    box.style.setProperty('--tag-font', EG.fontStack(c.branding.headingFont));
+    box.style.setProperty('--tag-body', EG.fontStack(c.branding.bodyFont));
+    box.innerHTML = `${c.branding.logoOnTag && c.branding.logo ? `<img class="t-logo" src="${esc(c.branding.logo)}" alt="">` : ''}
+      ${b.showEventName ? `<div class="t-ev">${esc(c.details.name)}</div>` : ''}
+      <div class="t-nm">Juan dela Cruz</div>
+      ${b.line2 ? `<div class="t-ds">${esc(val(b.line2))}</div>` : ''}
+      ${b.line3 ? `<div class="t-co">${esc(val(b.line3))}</div>` : ''}
+      <div class="t-pw">Powered by <img src="/jupiter-logo.png" alt=""></div>`;
+  }
+
+  let pageTimer = null;
+  function changed() {
+    $('saveBar').hidden = !isDirty();
+    $('saveErr').textContent = '';
+    clearTimeout(pageTimer);
+    pageTimer = setTimeout(postPage, 150);
+    if (pview === 'email') updateEmail();
+    if (pview === 'tag') renderTag();
+  }
+
+  // ------------------------------------------------------------ helpers for section HTML
+  const v = (path) => getPath(path) ?? '';
+  const text = (path, label, { help = '', placeholder = '', max = 160, type = 'text' } = {}) =>
+    `<div class="field"><label for="s_${path}">${esc(label)}</label><input id="s_${path}" type="${type}" data-path="${path}" value="${esc(v(path))}" maxlength="${max}" placeholder="${esc(placeholder)}"${type === 'number' ? ' data-kind="number" min="1"' : ''}>${help ? `<p class="help">${help}</p>` : ''}</div>`;
+  const area = (path, label, { help = '', rows = 4, max = 4000 } = {}) =>
+    `<div class="field"><label for="s_${path}">${esc(label)}</label><textarea id="s_${path}" data-path="${path}" rows="${rows}" maxlength="${max}">${esc(v(path))}</textarea>${help ? `<p class="help">${help}</p>` : ''}</div>`;
+  const check = (path, label) => `<label class="check"><input type="checkbox" data-path="${path}"${getPath(path) ? ' checked' : ''}> <span>${esc(label)}</span></label>`;
+  const FORMAT_HELP = 'Leave a blank line between paragraphs. Start lines with “- ” for a bulleted list, and wrap words in **double asterisks** for bold.';
+
+  function bind(container) {
+    container.querySelectorAll('[data-path]').forEach((el) => {
+      const evName = el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input';
+      el.addEventListener(evName, () => {
+        let val = el.type === 'checkbox' ? el.checked : el.value;
+        if (el.dataset.kind === 'number') val = val === '' ? null : Math.max(1, Math.floor(Number(val)) || 0) || null;
+        setPath(el.dataset.path, val);
+        if (el.dataset.after) AFTER[el.dataset.after]();
+        changed();
+      });
+    });
+  }
+  const AFTER = {
+    colors: () => colorWarnings(),
+    fonts: () => fontSamples(),
+  };
+
+  // ------------------------------------------------------------ sections
+  function renderSection() {
+    const body = $('secBody');
+    if (!body) return;
+    body.innerHTML = RENDER[section]();
+    bind(body);
+    (WIRE[section] || (() => {}))(body);
+  }
+
+  const STATUSES = [
+    ['draft', 'Draft', 'Hidden from the public. Use the preview while you set it up.'],
+    ['open', 'Open', 'The page is live and accepting registrations.'],
+    ['closed', 'Closed', 'The page shows your closed message. Passes still work at check-in.'],
+    ['archived', 'Archived', 'The event has ended. Check-in is off.'],
+  ];
+
+  const RENDER = {
+    details: () => `
+      <section class="card stack">
+        ${text('config.details.name', 'Event name', { max: 120 })}
+        <div class="field"><label for="s_slug">Web address</label><div class="prefix"><span>${esc(location.host)}/</span><input id="s_slug" type="text" data-path="slug" value="${esc(draft.slug)}" maxlength="50" autocapitalize="none" spellcheck="false"></div>
+          <p class="help">Lowercase letters, numbers and dashes. Changing it breaks links and QR codes you've already shared.</p></div>
+        <div class="field"><span class="lbl">Status</span><div class="status-pick">
+          ${STATUSES.map(([k, l, d]) => `<label><input type="radio" name="s_status" value="${k}"${draft.status === k ? ' checked' : ''}><span><b>${l}</b>${d}</span></label>`).join('')}
+        </div></div>
+      </section>
+      <section class="card stack">
+        <div class="two">
+          ${text('config.details.date', 'Date and time', { placeholder: 'e.g. Thursday, 12 November 2026, 8:00 AM', max: 120 })}
+          ${text('config.details.venue', 'Venue', { placeholder: 'e.g. SMX Convention Center, Pasay City' })}
+        </div>
+        ${text('config.details.organizer', 'Organizer', { help: 'Shown in emails: “Sent by … because you registered.”', max: 120 })}
+        ${area('config.details.intro', 'Introduction on the registration page', { help: FORMAT_HELP, rows: 4, max: 2000 })}
+        <div class="two">
+          <div class="field"><label for="s_tz">Time zone</label><select id="s_tz" data-path="config.details.timezone">${EG.TIMEZONES.map(([z, l]) => `<option value="${z}"${z === draft.config.details.timezone ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select><p class="help">Used for dashboard times and exports.</p></div>
+          ${text('config.details.capacity', 'Capacity (optional)', { type: 'number', help: 'Registration closes automatically at this number. Leave blank for no limit.', max: 6 })}
+        </div>
+      </section>
+      <section class="card stack">
+        <div class="field"><label for="s_pin">Staff check-in PIN</label><div class="pw-row"><input id="s_pin" type="text" data-path="staffPin" value="${esc(draft.staffPin)}" maxlength="12" inputmode="numeric"><button class="btn btn-quiet" type="button" id="pinGen">New PIN</button></div>
+          <p class="help">4 to 12 digits. Staff enter it on <a href="/${esc(ev.slug)}/checkin" target="_blank" rel="noopener">${esc(location.host)}/${esc(ev.slug)}/checkin</a>. Each event has its own PIN.</p></div>
+      </section>`,
+
+    branding: () => {
+      const b = draft.config.branding;
+      const color = (key, label, help) => `<div class="field"><label for="c_${key}">${label}</label><div class="color-row"><input type="color" id="cp_${key}" value="${b[key].toLowerCase()}" aria-label="${label} picker"><input type="text" id="c_${key}" value="${b[key]}" maxlength="7" spellcheck="false"></div><p class="help">${help}</p><p class="warn-text" id="w_${key}" hidden></p></div>`;
+      const fontSel = (key, label) => `<div class="field"><label for="f_${key}">${label}</label><select id="f_${key}" data-path="config.branding.${key}" data-after="fonts">${EG.FONTS.map((f) => `<option${f === b[key] ? ' selected' : ''}>${f}</option>`).join('')}</select><div class="font-sample" id="fs_${key}">The quick brown fox jumps over the lazy dog</div></div>`;
+      return `
+      <section class="card stack">
+        <h3>Logo</h3>
+        <div class="logo-box">
+          <div class="logo-prev" id="logoPrev">${b.logo ? `<img src="${esc(b.logo)}" alt="Event logo">` : 'No logo'}</div>
+          <div class="stack" style="gap:8px">
+            <div class="actions"><button class="btn btn-quiet btn-sm" type="button" id="logoPick">${b.logo ? 'Replace logo' : 'Upload logo'}</button>${b.logo ? '<button class="btn btn-quiet btn-sm btn-danger-text" type="button" id="logoRemove">Remove</button>' : ''}</div>
+            <input type="file" id="logoFile" accept="image/png,image/jpeg" hidden>
+            <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">PNG or JPG up to 2 MB. A wide logo on a transparent background looks best.</p>
+            <p class="err" id="logoErr"></p>
+          </div>
+        </div>
+      </section>
+      <section class="card stack">
+        <h3>Colours</h3>
+        ${color('primary', 'Main colour', 'Buttons, the badge header and the email’s top bar.')}
+        ${color('secondary', 'Accent colour', 'The lanyard on the badge preview and notice borders.')}
+        ${color('background', 'Page background', 'Keep it light so text stays readable.')}
+        <button class="linkish" type="button" id="resetColors" style="align-self:flex-start">Use the standard Jupiter colours</button>
+      </section>
+      <section class="card stack">
+        <h3>Text</h3>
+        <div class="two">${fontSel('headingFont', 'Heading font')}${fontSel('bodyFont', 'Body text font')}</div>
+        <div class="field"><span class="lbl">Text size</span><div class="seg" role="group" aria-label="Text size" id="sizeSeg">
+          ${Object.keys(EG.TEXT_SIZES).map((k) => `<button type="button" data-size="${k}" aria-pressed="${b.textSize === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}
+        </div><p class="help">Applies to the registration page.</p></div>
+      </section>`;
+    },
+
+    form: () => `
+      <section class="card stack">
+        <div class="an-head"><div><h3>Fields</h3><p class="sub" style="margin:0">First name, last name and email are always included. Use the switch to hide a field, the arrows to reorder.</p></div>
+          <button class="btn btn-primary btn-sm" type="button" id="addField">+ Add a field</button></div>
+        <ul class="fields-list" id="fieldList">${draft.config.form.fields.map(fieldRow).join('')}</ul>
+      </section>
+      <section class="card stack">
+        <h3>Consent</h3>
+        ${check('config.form.consent.enabled', 'Ask registrants to agree to a privacy or consent statement')}
+        <div class="stack" id="consentFields"${draft.config.form.consent.enabled ? '' : ' hidden'}>
+          ${text('config.form.consent.title', 'Statement title', { max: 120 })}
+          ${area('config.form.consent.body', 'Statement', { help: FORMAT_HELP, rows: 8, max: 6000 })}
+          ${area('config.form.consent.checkbox', 'Tick box text', { rows: 2, max: 400 })}
+        </div>
+      </section>
+      <section class="card stack">
+        <h3>Buttons and messages</h3>
+        <div class="two">${text('config.form.submitLabel', 'Register button', { max: 60 })}${text('config.form.successTitle', 'Heading after registering', { max: 80 })}</div>
+        ${text('config.form.closedMessage', 'Message when registration is closed', { max: 300 })}
+      </section>`,
+
+    email: () => {
+      const c = draft.config;
+      const chips = [...EG.PLACEHOLDERS, ...c.form.fields.filter((f) => f.enabled && !EG.PLACEHOLDERS.includes(f.key)).map((f) => f.key)];
+      const summaryOpts = c.form.fields.filter((f) => f.enabled && !['first_name', 'last_name'].includes(f.key));
+      return `
+      <section class="card stack">
+        <div class="two">
+          ${text('config.email.fromName', 'Sender name', { placeholder: c.details.name, max: 80, help: `Emails come from ${esc(platform.senderAddress || 'your MAIL_FROM address')}.` })}
+          ${text('config.email.replyTo', 'Replies go to (optional)', { type: 'email', placeholder: 'e.g. events@client.com', max: 254, help: 'Where answers to the email are delivered.' })}
+        </div>
+        ${text('config.email.subject', 'Subject', { max: 150 })}
+        ${area('config.email.body', 'Message above the QR code', { rows: 6, help: FORMAT_HELP })}
+        <div class="field"><span class="lbl">Insert a detail</span><div class="chips" id="phChips">${chips.map((k) => `<button type="button" data-ph="${k}">{${k}}</button>`).join('')}</div><p class="help">Click to add to the message where your cursor is. They're replaced with each registrant's details.</p></div>
+        <div class="field"><span class="lbl">Details listed under the QR code</span><div class="checks" id="sumChecks">
+          ${summaryOpts.map((f) => `<label class="check"><input type="checkbox" value="${f.key}"${c.email.summaryFields.includes(f.key) ? ' checked' : ''}> <span>${esc(f.label)}</span></label>`).join('')}
+        </div><p class="help">The attendee's name is always listed.</p></div>
+        ${area('config.email.footer', 'Note at the bottom', { rows: 3, max: 1000 })}
+        ${check('config.branding.logoInEmail', 'Show the event logo in the email')}
+      </section>
+      <section class="card stack">
+        <h3>Send a test</h3>
+        <p class="sub" style="margin:0">Sends this email, with your unsaved changes and a sample pass, to the address below.</p>
+        <div class="pw-row"><input id="testTo" type="email" placeholder="you@example.com" style="flex:1;min-width:0;font:inherit;color:var(--ink);background:var(--surface-2);border:1.5px solid var(--line);border-radius:10px;padding:.55rem .7rem;min-height:44px"><button class="btn btn-primary" type="button" id="testSend">Send test</button></div>
+        <p class="hint" id="testMsg" role="status"></p>
+      </section>`;
+    },
+
+    tag: () => {
+      const c = draft.config;
+      const opts = (sel) => `<option value="">Nothing</option>` + c.form.fields.filter((f) => f.enabled && !['first_name', 'last_name'].includes(f.key)).map((f) => `<option value="${f.key}"${f.key === sel ? ' selected' : ''}>${esc(f.label)}</option>`).join('');
+      return `
+      <section class="card stack">
+        <p class="sub" style="margin:0">Printed at the check-in desk when an attendee arrives. Their full name is always the main line. The same lines appear on the badge preview on the registration page.</p>
+        <div class="two">
+          <div class="field"><label for="s_l2">Second line</label><select id="s_l2" data-path="config.badge.line2">${opts(c.badge.line2)}</select></div>
+          <div class="field"><label for="s_l3">Third line</label><select id="s_l3" data-path="config.badge.line3">${opts(c.badge.line3)}</select></div>
+        </div>
+        ${check('config.badge.showEventName', 'Show the event name at the top')}
+        ${check('config.branding.logoOnTag', 'Print the event logo (in black and white on most label printers)')}
+      </section>`;
+    },
+  };
+
+  // ---- fields list
+  function fieldRow(f, i, all) {
+    const locked = EG.LOCKED.includes(f.key);
+    const builtin = EG.BUILTIN.includes(f.key);
+    const n = (all || draft.config.form.fields).length;
+    const typeChoices = builtin ? (f.key === 'contact_number' ? ['phone_ph', 'phone', 'text'] : f.key === 'company_address' ? ['address_ph', 'textarea', 'text'] : [f.type]) : Object.keys(EG.FIELD_TYPES).filter((t) => t !== 'email');
+    const isOpen = openKey === f.key;
+    return `<li class="frow${f.enabled ? '' : ' off'}" data-key="${f.key}">
+      <div class="fhead">
+        <div class="order">
+          <button type="button" data-mv="-1" aria-label="Move ${esc(f.label)} up"${i === 0 ? ' disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg></button>
+          <button type="button" data-mv="1" aria-label="Move ${esc(f.label)} down"${i === n - 1 ? ' disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+        </div>
+        <div class="ftitle"><b data-title>${esc(f.label)}</b><span data-meta>${esc(fieldTypeLabel(f.type))} · ${f.required ? 'Required' : 'Optional'} · ${f.width === 'full' ? 'Full width' : 'Half width'}</span></div>
+        <div class="fctl">
+          <label class="switch" title="${locked ? 'Always shown' : 'Show on the form'}"><input type="checkbox" data-f="enabled"${f.enabled ? ' checked' : ''}${locked ? ' disabled' : ''} aria-label="Show ${esc(f.label)} on the form"></label>
+          <button class="btn btn-quiet btn-sm" type="button" data-f-act="edit" aria-expanded="${isOpen}">${isOpen ? 'Done' : 'Edit'}</button>
+        </div>
+      </div>
+      ${isOpen ? `<div class="fedit">
+        <div class="two">
+          <div class="field"><label>Label</label><input type="text" data-f="label" value="${esc(f.label)}" maxlength="80"></div>
+          <div class="field"><label>Type</label><select data-f="type"${typeChoices.length < 2 ? ' disabled' : ''}>${typeChoices.map((t) => `<option value="${t}"${t === f.type ? ' selected' : ''}>${esc(fieldTypeLabel(t))}</option>`).join('')}</select></div>
+        </div>
+        <div class="two">
+          <div class="field"><label>Width</label><select data-f="width"><option value="half"${f.width !== 'full' ? ' selected' : ''}>Half width</option><option value="full"${f.width === 'full' ? ' selected' : ''}>Full width</option></select></div>
+          <div class="field"><span class="lbl">&nbsp;</span><label class="check"><input type="checkbox" data-f="required"${f.required ? ' checked' : ''}${locked ? ' disabled' : ''}> <span>Required</span></label></div>
+        </div>
+        ${f.type === 'address_ph' ? '<p class="help" style="margin:0">Registrants type the unit, floor, building and street, then choose the region, province, city or municipality and barangay from lists (PSA 2025 data). The postal code fills in automatically when the city has only one.</p>' : ''}
+        ${f.type === 'checkbox' ? '' : `<div class="field"><label>${['select'].includes(f.type) ? 'Text shown before a choice is made' : 'Example text inside the box'}</label><input type="text" data-f="placeholder" value="${esc(f.placeholder)}" maxlength="80"></div>`}
+        <div class="field"><label>Help text under the field</label><input type="text" data-f="help" value="${esc(f.help)}" maxlength="160"></div>
+        ${['select', 'radio'].includes(f.type) ? `<div class="field"><label>Choices</label><textarea data-f="options" rows="4">${esc((f.options || []).join('\n'))}</textarea><p class="help">One choice per line.</p></div>` : ''}
+        ${builtin ? '' : '<div><button class="btn btn-quiet btn-sm btn-danger-text" type="button" data-f-act="remove">Remove this field</button></div>'}
+      </div>` : ''}
+    </li>`;
+  }
+  function renderFields() {
+    const list = $('fieldList');
+    if (list) list.innerHTML = draft.config.form.fields.map(fieldRow).join('');
+  }
+
+  const WIRE = {
+    details(body) {
+      body.querySelectorAll('input[name="s_status"]').forEach((r) => r.addEventListener('change', () => { draft.status = r.value; changed(); }));
+      $('s_slug').addEventListener('input', (e) => { const s = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'); if (s !== e.target.value) e.target.value = s; draft.slug = s; changed(); });
+      $('pinGen').addEventListener('click', () => { const pin = String(100000 + Math.floor(Math.random() * 900000)); $('s_pin').value = pin; draft.staffPin = pin; changed(); });
+    },
+    branding(body) {
+      for (const key of ['primary', 'secondary', 'background']) {
+        const pick = $(`cp_${key}`), hex = $(`c_${key}`);
+        pick.addEventListener('input', () => { hex.value = pick.value.toUpperCase(); draft.config.branding[key] = hex.value; colorWarnings(); changed(); });
+        hex.addEventListener('input', () => {
+          let s = hex.value.trim(); if (!s.startsWith('#')) s = `#${s}`;
+          if (/^#[0-9a-fA-F]{6}$/.test(s)) { draft.config.branding[key] = s.toUpperCase(); pick.value = s.toLowerCase(); colorWarnings(); changed(); }
+        });
+      }
+      $('resetColors').addEventListener('click', () => {
+        Object.assign(draft.config.branding, { primary: '#E00000', secondary: '#141414', background: '#F2F2F2' });
+        renderSection(); changed();
+      });
+      body.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('click', () => {
+        draft.config.branding.textSize = b.dataset.size;
+        body.querySelectorAll('[data-size]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        changed();
+      }));
+      $('logoPick').addEventListener('click', () => $('logoFile').click());
+      $('logoFile').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        $('logoErr').textContent = '';
+        if (!file) return;
+        if (!['image/png', 'image/jpeg'].includes(file.type)) { $('logoErr').textContent = 'Choose a PNG or JPG image.'; return; }
+        if (file.size > 2 * 1024 * 1024) { $('logoErr').textContent = 'That image is larger than 2 MB. Use a smaller file.'; return; }
+        try {
+          const r = await fetch(`/api/admin/events/${ev.id}/logo`, { method: 'POST', headers: { 'content-type': file.type }, body: file });
+          const out = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(out.message || 'The logo could not be uploaded.');
+          draft.config.branding.logo = out.logo;
+          renderSection(); changed();
+        } catch (err) { $('logoErr').textContent = err.message; }
+      });
+      if ($('logoRemove')) $('logoRemove').addEventListener('click', () => { draft.config.branding.logo = null; renderSection(); changed(); });
+      colorWarnings();
+      fontSamples();
+    },
+    form(body) {
+      $('addField').addEventListener('click', () => {
+        const key = `c_${Math.random().toString(36).slice(2, 8)}`;
+        draft.config.form.fields.push({ key, type: 'text', label: 'New question', required: false, enabled: true, width: 'half', placeholder: '', help: '' });
+        openKey = key;
+        renderFields(); changed();
+        const input = body.querySelector(`[data-key="${key}"] [data-f="label"]`);
+        if (input) { input.focus(); input.select(); input.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      });
+      const consentBox = body.querySelector('[data-path="config.form.consent.enabled"]');
+      consentBox.addEventListener('change', () => { $('consentFields').hidden = !consentBox.checked; });
+      const list = $('fieldList');
+      const fieldAt = (el) => { const li = el.closest('[data-key]'); return li && draft.config.form.fields.find((f) => f.key === li.dataset.key); };
+      list.addEventListener('click', (e) => {
+        const mv = e.target.closest('[data-mv]');
+        const act = e.target.closest('[data-f-act]');
+        const f = fieldAt(e.target);
+        if (!f) return;
+        const arr = draft.config.form.fields;
+        if (mv) {
+          const i = arr.indexOf(f), j = i + Number(mv.dataset.mv);
+          if (j < 0 || j >= arr.length) return;
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+          renderFields(); changed();
+          const again = list.querySelector(`[data-key="${f.key}"] [data-mv="${mv.dataset.mv}"]`);
+          if (again && !again.disabled) again.focus();
+        } else if (act && act.dataset.fAct === 'edit') {
+          openKey = openKey === f.key ? null : f.key;
+          renderFields();
+        } else if (act && act.dataset.fAct === 'remove') {
+          if (!confirm(`Remove “${f.label}” from the form? Answers already collected stay in the records but won't show on the dashboard or in exports.`)) return;
+          draft.config.form.fields = arr.filter((x) => x !== f);
+          for (const k of ['line2', 'line3']) if (draft.config.badge[k] === f.key) draft.config.badge[k] = '';
+          draft.config.email.summaryFields = draft.config.email.summaryFields.filter((k) => k !== f.key);
+          openKey = null;
+          renderFields(); changed();
+        }
+      });
+      const onEdit = (e) => {
+        const el = e.target.closest('[data-f]');
+        const f = el && fieldAt(el);
+        if (!f) return;
+        const k = el.dataset.f;
+        if (k === 'enabled' || k === 'required') f[k] = el.checked;
+        else if (k === 'options') f.options = el.value.split('\n').map((s) => s.trim()).filter(Boolean);
+        else f[k] = el.value;
+        if (k === 'type' && ['select', 'radio'].includes(f.type) && !(f.options && f.options.length)) f.options = ['Option 1', 'Option 2'];
+        const li = el.closest('[data-key]');
+        if (k === 'type' || k === 'enabled') { renderFields(); }
+        else {
+          li.querySelector('[data-title]').textContent = f.label;
+          li.querySelector('[data-meta]').textContent = `${fieldTypeLabel(f.type)} · ${f.required ? 'Required' : 'Optional'} · ${f.width === 'full' ? 'Full width' : 'Half width'}`;
+        }
+        changed();
+      };
+      list.addEventListener('input', (e) => { if (e.target.matches('input[type=text], textarea')) onEdit(e); });
+      list.addEventListener('change', (e) => { if (e.target.matches('select, input[type=checkbox]')) onEdit(e); });
+    },
+    email(body) {
+      let lastArea = $('s_config.email.body');
+      body.querySelectorAll('textarea, input[type=text]').forEach((el) => el.addEventListener('focus', () => { if (el.dataset.path && /email\.(body|subject|footer)$/.test(el.dataset.path)) lastArea = el; }));
+      $('phChips').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-ph]');
+        if (!b || !lastArea) return;
+        const token = `{${b.dataset.ph}}`;
+        const s = lastArea.selectionStart ?? lastArea.value.length, en = lastArea.selectionEnd ?? s;
+        lastArea.value = lastArea.value.slice(0, s) + token + lastArea.value.slice(en);
+        lastArea.focus();
+        lastArea.setSelectionRange(s + token.length, s + token.length);
+        lastArea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      $('sumChecks').addEventListener('change', () => {
+        draft.config.email.summaryFields = [...$('sumChecks').querySelectorAll('input:checked')].map((i) => i.value);
+        changed();
+      });
+      $('testSend').addEventListener('click', async () => {
+        const to = $('testTo').value.trim();
+        $('testMsg').textContent = 'Sending…';
+        try {
+          await A.post(`/api/admin/events/${ev.id}/email-test`, { to, config: draft.config });
+          $('testMsg').textContent = platform.smtp ? `Sent to ${to}. Check the inbox (and spam folder) in a minute.` : 'Built, but email isn’t set up on this server, so it was saved to the outbox folder instead of being sent.';
+        } catch (err) { $('testMsg').textContent = err.message; }
+      });
+    },
+  };
+
+  function colorWarnings() {
+    const b = draft.config.branding;
+    const set = (k, msg) => { const el = $(`w_${k}`); if (el) { el.textContent = msg || ''; el.hidden = !msg; } };
+    set('background', EG.contrast(b.background, '#5C5C5C') < 4.5 ? 'This background is too dark: grey text on the page will be hard to read. Choose a lighter colour.' : '');
+    set('primary', EG.contrast(b.primary, b.background) < 2 ? 'Buttons will blend into the background. Choose a stronger main colour.' : '');
+    set('secondary', '');
+  }
+  function fontSamples() {
+    const b = draft.config.branding;
+    const url = EG.googleFontsUrl([b.headingFont, b.bodyFont]);
+    if (url && !document.querySelector(`link[href="${url}"]`)) {
+      const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = url; document.head.appendChild(l);
+    }
+    for (const k of ['headingFont', 'bodyFont']) { const el = $(`fs_${k}`); if (el) el.style.fontFamily = EG.fontStack(b[k]); }
+  }
+
+  // ------------------------------------------------------------ save
+  async function save() {
+    const btn = $('saveBtn');
+    btn.disabled = true;
+    $('saveErr').textContent = '';
+    try {
+      const fresh = await A.post(`/api/admin/events/${ev.id}`, { slug: draft.slug, status: draft.status, staffPin: draft.staffPin, config: draft.config }, 'PUT');
+      const slugChanged = fresh.slug !== ev.slug;
+      ev = { ...ev, ...fresh };
+      draft = clone({ slug: fresh.slug, status: fresh.status, staffPin: fresh.staffPin, config: fresh.config });
+      saved = JSON.stringify(draft);
+      if (slugChanged) $('pageFrame').src = `/${encodeURIComponent(fresh.slug)}?preview=1`;
+      renderSection();
+      changed();
+      if (onSaved) await onSaved(fresh);
+      A.reloadEvents().catch(() => {});
+    } catch (err) {
+      if (err.message !== 'signed out') $('saveErr').textContent = err.message;
+    } finally { btn.disabled = false; }
+  }
+
+  window.Settings = { open, close, isDirty };
+})();

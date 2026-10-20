@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Event registration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="fontLink" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap">
+<style>
+  /* Colours, fonts and text size come from each event's settings (applied by the script below). */
+  :root {
+    --bg: #F2F2F2; --surface: #FFFFFF; --ink: #141414; --muted: #5C5C5C; --line: #D4D4D4;
+    --primary: #E00000; --on-primary: #FFFFFF; --secondary: #141414; --on-secondary: #FFFFFF; --error: #B8322A; --ok: #1E7A4C;
+    --display: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    --body: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light; box-sizing: border-box; font-size: 16px;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { height: 100%; }
+  *, *::before, *::after { box-sizing: inherit; }
+  [hidden] { display: none !important; }
+  body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font: 400 1rem/1.55 var(--body); -webkit-font-smoothing: antialiased; }
+  img { max-width: 100%; }
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  .powered { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .powered img { display: block; height: 24px; width: auto; }
+  .wrap > .powered { grid-column: 1 / -1; margin-top: 8px; }
+
+  .wrap {
+    max-width: 1120px; margin: 0 auto; padding: clamp(1.5rem, 4vw, 3.5rem) clamp(1rem, 4vw, 3rem) 4rem;
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: clamp(2rem, 6vw, 5rem); align-items: start;
+  }
+  .wrap.single { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+
+  /* ---------- intro ---------- */
+  .brand-logo { display: block; max-height: 76px; max-width: min(280px, 100%); width: auto; height: auto; margin: 0 0 1.5rem; }
+  h1 { font: 700 clamp(2.1rem, 5.4vw, 3.6rem)/1.04 var(--display); letter-spacing: -0.02em; margin: 0 0 1rem; overflow-wrap: anywhere; }
+  .meta { margin: 0; color: var(--muted); font-size: 1.02rem; }
+  .meta span { display: block; }
+  .lede { max-width: 56ch; margin: 1.5rem 0 2.25rem; font-size: 1.05rem; }
+  .lede p { margin: 0 0 .75rem; }
+  .lede ul { margin: 0 0 .75rem; padding-left: 1.2rem; }
+
+  .notice { background: var(--surface); border-left: 4px solid var(--secondary); border-radius: 0 10px 10px 0; padding: .9rem 1.1rem; margin: 0 0 1.75rem; font-size: .98rem; max-width: 60ch; }
+  .notice.bad { border-left-color: var(--error); }
+  .notice b { display: block; font-size: 1.05rem; margin-bottom: .15rem; }
+
+  /* ---------- form ---------- */
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 1.15rem 1rem; max-width: 640px; }
+  .full { grid-column: 1 / -1; }
+  .field > label, .field > .lbl { display: block; font-weight: 700; font-size: .93rem; margin-bottom: .35rem; }
+  .opt { font-weight: 400; color: var(--muted); }
+  .field input:not([type=checkbox]):not([type=radio]), .field textarea, .field select {
+    width: 100%; font: inherit; color: var(--ink); background: var(--surface);
+    border: 1.5px solid var(--line); border-radius: 10px; padding: .72rem .85rem; min-height: 48px; transition: border-color .15s;
+  }
+  .field select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%; background-size: 6px 6px; background-repeat: no-repeat; padding-right: 2.4rem; }
+  .field textarea { resize: vertical; min-height: 84px; }
+  .field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible { outline: 3px solid color-mix(in srgb, var(--ink) 22%, transparent); outline-offset: 0; border-color: var(--ink); }
+  .field.invalid input, .field.invalid textarea, .field.invalid select, .field.invalid .phone, .field.invalid .choices { border-color: var(--error); }
+  .err { color: var(--error); font-size: .86rem; margin: .3rem 0 0; }
+  .err:empty { display: none; }
+  .hint { color: var(--muted); font-size: .84rem; margin: .3rem 0 0; }
+  .choices { display: flex; flex-direction: column; gap: .35rem; border: 1.5px solid transparent; border-radius: 10px; }
+  .field > label.tick { font-weight: 400; font-size: .97rem; margin: 0; }
+  .choice, .tick { display: flex; gap: .6rem; align-items: flex-start; font-size: .97rem; cursor: pointer; }
+  .choice input, .tick input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--primary); }
+  .phone { display: flex; align-items: stretch; background: var(--surface); border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; transition: border-color .15s; }
+  .phone:focus-within { border-color: var(--ink); outline: 3px solid color-mix(in srgb, var(--ink) 22%, transparent); }
+  .phone .cc { display: flex; align-items: center; padding: 0 .75rem; font-weight: 700; background: var(--bg); border-right: 1.5px solid var(--line); user-select: none; }
+  .field .phone input { border: 0 !important; border-radius: 0 !important; min-width: 0; }
+  .field .phone input:focus-visible { outline: none; }
+
+  /* Philippine address: street, then region > province > city > barangay, then postal code */
+  fieldset.addr { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset.addr legend { font-weight: 700; font-size: .93rem; margin-bottom: .45rem; padding: 0; }
+  .addr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem 1rem; padding: 1rem; background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; }
+  .field.invalid .addr-grid { border-color: var(--error); }
+  .addr-grid .sub { min-width: 0; }
+  .addr-grid .sub.wide { grid-column: 1 / -1; }
+  .addr-grid label { display: block; font-weight: 600; font-size: .84rem; margin-bottom: .3rem; color: var(--muted); }
+  .field .addr-grid input, .field .addr-grid select { background-color: var(--bg); }
+  .field .addr-grid select:disabled { opacity: .6; }
+  @media (max-width: 560px) { .addr-grid { grid-template-columns: 1fr; padding: .85rem; } }
+  .consent { display: flex; gap: .7rem; align-items: flex-start; font-size: .93rem; }
+  .consent input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--primary); }
+  .consent label { cursor: pointer; }
+  .privacy { background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; font-size: .9rem; line-height: 1.55; color: var(--muted); }
+  .privacy h2 { font: 700 1.05rem/1.3 var(--display); color: var(--ink); margin: 0 0 .5rem; }
+  .privacy p { margin: 0 0 .6rem; }
+  .privacy ul { margin: 0 0 .6rem; padding-left: 1.15rem; }
+  .privacy li { margin: 0 0 .45rem; }
+  .privacy > :last-child, .privacy ul:last-child li:last-child { margin-bottom: 0; }
+  .privacy strong { color: var(--ink); font-weight: 700; }
+
+  .form-msg { grid-column: 1 / -1; margin: 0; padding: .8rem 1rem; border-radius: 10px; background: var(--surface); border: 1.5px solid var(--error); font-size: .95rem; }
+  .form-msg.info { border-color: var(--secondary); }
+  .form-msg:empty { display: none; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 50px; padding: .85rem 1.4rem; border-radius: 10px; border: 1.5px solid transparent; font: 700 1rem var(--body); cursor: pointer; text-decoration: none; }
+  .btn-primary { background: var(--primary); color: var(--on-primary); }
+  .btn-primary:hover { filter: brightness(1.07); }
+  .btn-primary:disabled { opacity: .6; cursor: not-allowed; filter: none; }
+  .btn-quiet { background: transparent; color: var(--ink); border-color: var(--line); }
+  .btn-quiet:hover { border-color: var(--ink); }
+  .submit-row { grid-column: 1 / -1; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: .25rem; }
+
+  /* ---------- done ---------- */
+  #done h2 { font: 700 clamp(1.9rem, 4vw, 2.6rem)/1.05 var(--display); letter-spacing: -0.02em; margin: 0 0 .9rem; }
+  #done h2:focus { outline: none; }
+  #done p { max-width: 52ch; margin: 0 0 1rem; }
+  #done .actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.75rem; }
+
+  /* ---------- the badge ---------- */
+  .badge-col { position: sticky; top: env(safe-area-inset-top, 0px); display: flex; flex-direction: column; align-items: center; perspective: 900px; }
+  .strap { width: 34px; height: 120px; background: var(--secondary); overflow: hidden; display: flex; justify-content: center; }
+  .strap span { writing-mode: vertical-rl; font: 700 .74rem/1 var(--display); color: var(--on-secondary); white-space: nowrap; padding-top: 10px; letter-spacing: .02em; }
+  .clip { width: 24px; height: 28px; border: 4px solid #9A9A9A; border-radius: 7px; margin-top: -6px; position: relative; z-index: 1; }
+  .card { width: 100%; background: #FFFFFF; color: #141414; border-radius: 16px; overflow: hidden; margin-top: -10px; box-shadow: 0 1px 0 rgba(22, 34, 58, .05), 0 22px 44px -22px rgba(22, 34, 58, .55); transform-origin: 50% 0; }
+  .band { background: var(--primary); color: var(--on-primary); padding: 12px 20px 18px; }
+  .slot { width: 52px; height: 9px; border-radius: 5px; background: var(--bg); margin: 0 auto 14px; }
+  .band .ev { font: 700 1.02rem/1.2 var(--display); overflow-wrap: anywhere; }
+  .band .when { font-size: .8rem; opacity: .88; margin-top: 3px; }
+  .who { padding: 22px 20px 6px; }
+  .who .nm { font: 700 1.85rem/1.04 var(--display); letter-spacing: -0.015em; overflow-wrap: anywhere; min-height: 1.04em; }
+  .who .ds { margin-top: 10px; font-weight: 700; font-size: .98rem; overflow-wrap: anywhere; }
+  .who .co { color: #5C5C5C; font-size: .95rem; overflow-wrap: anywhere; }
+  .who .ghost { color: #ADADAD; }
+  .pass { display: flex; align-items: flex-end; gap: 14px; padding: 16px 20px 22px; }
+  .qr { width: 132px; aspect-ratio: 1; flex: none; border: 1.5px dashed #D4D4D4; border-radius: 10px; display: grid; place-items: center; text-align: center; font-size: .74rem; line-height: 1.35; color: #7A7A7A; padding: 10px; }
+  .qr img { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+  .card.issued .qr { border: 0; padding: 0; }
+  .code { font: 700 .82rem/1.3 var(--body); color: #5C5C5C; padding-bottom: 4px; }
+  .code b { display: block; font: 700 1.15rem/1.2 var(--display); color: #141414; letter-spacing: .04em; }
+
+  .skeleton h1, .skeleton .meta { color: transparent; background: #E4E4E4; border-radius: 8px; }
+
+  @media (max-width: 880px) {
+    .wrap { grid-template-columns: 1fr; }
+    .badge-col { position: static; order: -1; max-width: 300px; width: 100%; margin: 0 auto; }
+    .strap { height: 56px; }
+  }
+  @media (max-width: 560px) { form { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap" id="wrap">
+  <section id="main">
+    <img class="brand-logo" id="logo" alt="" hidden>
+    <h1 id="evName">Event registration</h1>
+    <p class="meta"><span id="evDate"></span><span id="evVenue"></span></p>
+    <div class="lede" id="intro"></div>
+
+    <div class="notice" id="notice" hidden></div>
+
+    <form id="form" novalidate hidden>
+      <div id="fields" style="display:contents"></div>
+      <div class="full" id="consentBlock">
+        <section class="privacy" aria-labelledby="privacyTitle" id="privacy">
+          <h2 id="privacyTitle"></h2>
+          <div id="privacyBody"></div>
+        </section>
+        <div class="consent">
+          <input type="checkbox" id="consent" name="consent">
+          <label for="consent" id="consentLabel"></label>
+        </div>
+        <p class="err" id="consent-err"></p>
+      </div>
+      <p class="form-msg" id="formMsg" role="alert"></p>
+      <div class="submit-row">
+        <button class="btn btn-primary" id="submit" type="submit">Register</button>
+      </div>
+    </form>
+
+    <section id="done" hidden>
+      <h2 tabindex="-1" id="doneTitle">You're registered</h2>
+      <p id="doneMsg"></p>
+      <p id="doneHint"></p>
+      <div class="actions">
+        <a class="btn btn-primary" id="download" download>Download QR pass</a>
+        <button class="btn btn-quiet" id="again" type="button">Register another person</button>
+      </div>
+    </section>
+  </section>
+
+  <aside class="badge-col" id="badgeCol" aria-label="Your event pass preview" hidden>
+    <div class="strap" aria-hidden="true"><span id="strapText"></span></div>
+    <div class="clip" aria-hidden="true"></div>
+    <div class="card" id="card">
+      <div class="band">
+        <div class="slot" aria-hidden="true"></div>
+        <div class="ev" id="bEvent"></div>
+        <div class="when" id="bWhen"></div>
+      </div>
+      <div class="who">
+        <div class="nm ghost" id="bName">Your name</div>
+        <div class="ds ghost" id="bL2"></div>
+        <div class="co ghost" id="bL3"></div>
+      </div>
+      <div class="pass">
+        <div class="qr" id="bQr">Your QR pass appears here after you register</div>
+        <div class="code" id="bCode" hidden>Pass code<b id="bCodeVal"></b></div>
+      </div>
+    </div>
+  </aside>
+  <footer class="powered">
+    <span>Powered by</span>
+    <img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24">
+  </footer>
+</main>
+
+<script src="/shared.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const form = $('form');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const params = new URLSearchParams(location.search);
+  const PREVIEW = params.has('preview');
+  const slug = decodeURIComponent(location.pathname.split('/')[1] || '');
+  let ev = null;          // the event as returned by /api/e/:slug
+  let fields = [];
+  let issued = false;
+  let canSubmit = false;
+
+  // ---------- look and feel ----------
+  function applyBranding(b, fontsOnly) {
+    const r = document.documentElement.style;
+    r.setProperty('--primary', b.primary);
+    r.setProperty('--on-primary', EG.textOn(b.primary));
+    r.setProperty('--secondary', b.secondary);
+    r.setProperty('--on-secondary', EG.textOn(b.secondary));
+    r.setProperty('--bg', b.background);
+    r.setProperty('--display', EG.fontStack(b.headingFont));
+    r.setProperty('--body', EG.fontStack(b.bodyFont));
+    r.fontSize = `${EG.TEXT_SIZES[b.textSize] || 16}px`;
+    const url = EG.googleFontsUrl([b.headingFont, b.bodyFont]);
+    if (url && $('fontLink').href !== url) $('fontLink').href = url;
+    const logo = $('logo');
+    if (b.logo) { logo.src = b.logo; logo.alt = ev ? (ev.details.organizer || ev.details.name) : ''; logo.hidden = false; } else logo.hidden = true;
+  }
+
+  // ---------- form fields ----------
+  const esc = EG.esc;
+  function fieldHtml(f) {
+    const id = `f_${f.key}`;
+    const req = f.required ? 'required' : '';
+    const opt = f.required ? '' : ' <span class="opt">(optional)</span>';
+    const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
+    const auto = { first_name: 'given-name', last_name: 'family-name', email: 'email', designation: 'organization-title', company_name: 'organization', company_address: 'street-address', contact_number: 'tel-national' }[f.key] || 'off';
+    const help = f.help ? `<p class="hint" id="${id}-hint">${esc(f.help)}</p>` : '';
+    const desc = f.help ? ` aria-describedby="${id}-hint"` : '';
+    const wide = f.width === 'full' || ['textarea', 'radio'].includes(f.type) ? ' full' : '';
+    let control;
+    switch (f.type) {
+      case 'textarea': control = `<textarea id="${id}" name="${f.key}" rows="2" maxlength="500" autocomplete="${auto}"${ph}${desc} ${req}></textarea>`; break;
+      case 'email': control = `<input id="${id}" name="${f.key}" type="email" inputmode="email" maxlength="254" autocomplete="email"${ph}${desc} ${req}>`; break;
+      case 'phone_ph': control = `<div class="phone"><span class="cc" aria-hidden="true">+63</span><input id="${id}" name="${f.key}" type="tel" inputmode="numeric" autocomplete="tel-national"${ph}${desc} ${req} data-phone-ph></div>`; break;
+      case 'phone': control = `<input id="${id}" name="${f.key}" type="tel" inputmode="tel" maxlength="20" autocomplete="tel"${ph}${desc} ${req}>`; break;
+      case 'number': control = `<input id="${id}" name="${f.key}" type="text" inputmode="decimal" maxlength="20"${ph}${desc} ${req}>`; break;
+      case 'date': control = `<input id="${id}" name="${f.key}" type="date"${desc} ${req}>`; break;
+      case 'select': control = `<select id="${id}" name="${f.key}"${desc} ${req}><option value="">${esc(f.placeholder || 'Choose…')}</option>${f.options.map((o) => `<option>${esc(o)}</option>`).join('')}</select>`; break;
+      case 'radio':
+        return `<fieldset class="field${wide}" style="border:0;padding:0;margin:0;min-width:0"><legend class="lbl" style="font-weight:700;font-size:.93rem;margin-bottom:.35rem;padding:0">${esc(f.label)}${opt}</legend>
+          <div class="choices" id="${id}">${f.options.map((o, i) => `<label class="choice"><input type="radio" name="${f.key}" value="${esc(o)}"${i === 0 ? desc : ''}> <span>${esc(o)}</span></label>`).join('')}</div>${help}<p class="err" id="${f.key}-err"></p></fieldset>`;
+      case 'address_ph':
+        return `<fieldset class="field full addr" data-addr="${f.key}"><legend>${esc(f.label)}${opt}</legend>
+          <div class="addr-grid">
+            <div class="sub wide"><label for="${id}_street">Unit, floor, building and street</label><input id="${id}_street" data-part="street" type="text" maxlength="200" autocomplete="street-address" placeholder="${esc(f.placeholder || 'e.g. Unit 5B, 3F Clark Center, Jose Abad Santos Ave.')}"></div>
+            <div class="sub"><label for="${id}_region">Region</label><select id="${id}_region" data-part="region"><option value="">Loading…</option></select></div>
+            <div class="sub"><label for="${id}_province">Province</label><select id="${id}_province" data-part="province" disabled><option value="">Choose a region first</option></select></div>
+            <div class="sub"><label for="${id}_city">City / Municipality</label><select id="${id}_city" data-part="city" disabled><option value="">Choose a province first</option></select></div>
+            <div class="sub"><label for="${id}_barangay">Barangay</label><select id="${id}_barangay" data-part="barangay" disabled><option value="">Choose a city first</option></select></div>
+            <div class="sub"><label for="${id}_zip">Postal code</label><select id="${id}_zip" data-part="zip" disabled><option value="">Choose a city first</option></select>
+              <input id="${id}_zipText" data-part="zipText" type="text" inputmode="numeric" maxlength="4" placeholder="4-digit code" hidden aria-label="Postal code"></div>
+          </div>${help}<p class="err" id="${f.key}-err"></p></fieldset>`;
+      case 'checkbox':
+        return `<div class="field full"><label class="tick"><input type="checkbox" id="${id}" name="${f.key}"${desc}> <span>${esc(f.label)}${opt}</span></label>${help}<p class="err" id="${f.key}-err"></p></div>`;
+      default: control = `<input id="${id}" name="${f.key}" type="text" maxlength="150" autocomplete="${auto}"${ph}${desc} ${req}>`;
+    }
+    return `<div class="field${wide}"><label for="${id}">${esc(f.label)}${opt}</label>${control}${help}<p class="err" id="${f.key}-err"></p></div>`;
+  }
+
+  function renderForm() {
+    fields = ev.form.fields;
+    $('fields').innerHTML = fields.map(fieldHtml).join('');
+    const c = ev.form.consent;
+    $('consentBlock').hidden = !c.enabled;
+    $('privacy').hidden = !(c.title || c.body);
+    $('privacyTitle').textContent = c.title;
+    $('privacyTitle').hidden = !c.title;
+    $('privacyBody').innerHTML = EG.richText(c.body);
+    $('consentLabel').textContent = c.checkbox;
+    $('submit').textContent = ev.form.submitLabel;
+    form.querySelectorAll('fieldset[data-addr]').forEach(initAddress);
+    form.querySelectorAll('[data-phone-ph]').forEach((input) => {
+      input.addEventListener('input', () => {
+        let v = input.value.replace(/\D/g, '');
+        if (v.length > 10 && v.startsWith('63')) v = v.slice(2);
+        v = v.replace(/^0+/, '').slice(0, 10);
+        if (v !== input.value) input.value = v;
+      });
+    });
+    syncBadge();
+  }
+
+  // ---------- Philippine address ----------
+  let PH = null, phLoading = null;
+  const brgyCache = new Map();
+  const loadPH = () => (phLoading = phLoading || fetch('/api/ph/locations').then((r) => { if (!r.ok) throw new Error(); return r.json(); }).then((d) => (PH = d)));
+  const options = (list, placeholder) => `<option value="">${esc(placeholder)}</option>` + list.map((v) => `<option>${esc(v)}</option>`).join('');
+  function initAddress(box) {
+    const q = (p) => box.querySelector(`[data-part="${p}"]`);
+    const region = q('region'), province = q('province'), city = q('city'), brgy = q('barangay'), zip = q('zip'), zipText = q('zipText');
+    const lock = (sel, text) => { sel.innerHTML = `<option value="">${esc(text)}</option>`; sel.disabled = true; };
+    const R = () => PH && PH.regions.find((r) => r.n === region.value);
+    const P = () => { const r = R(); return r && r.p.find((p) => p.n === province.value); };
+    const C = () => { const p = P(); return p && p.c.find((c) => c.n === city.value); };
+    function setZip(c) {
+      zipText.hidden = true; zip.hidden = false; zipText.value = '';
+      if (!c) return lock(zip, 'Choose a city first');
+      if (c.z.length === 0) { zip.hidden = true; zipText.hidden = false; return; }
+      zip.disabled = false;
+      if (c.z.length === 1) { const [code, area] = c.z[0]; zip.innerHTML = `<option value="${code}" selected>${code}${area ? ` – ${esc(area)}` : ''}</option>`; return; }
+      zip.innerHTML = `<option value="">Choose the postal code</option>` + c.z.map(([code, area]) => `<option value="${code}">${code}${area ? ` – ${esc(area)}` : ''}</option>`).join('');
+    }
+    region.addEventListener('change', () => {
+      lock(city, 'Choose a province first'); lock(brgy, 'Choose a city first'); setZip(null);
+      const r = R();
+      if (!r) return lock(province, 'Choose a region first');
+      if (r.p.length === 1) {               // e.g. NCR: Metro Manila is filled in
+        province.innerHTML = `<option selected>${esc(r.p[0].n)}</option>`; province.disabled = true;
+        province.dispatchEvent(new Event('change', { bubbles: true }));
+      } else { province.innerHTML = options(r.p.map((p) => p.n), 'Choose a province'); province.disabled = false; }
+    });
+    province.addEventListener('change', () => {
+      lock(brgy, 'Choose a city first'); setZip(null);
+      const p = P();
+      if (!p) return lock(city, 'Choose a province first');
+      city.innerHTML = options(p.c.map((c) => c.n), 'Choose a city or municipality'); city.disabled = false;
+    });
+    city.addEventListener('change', async () => {
+      const c = C();
+      setZip(c);
+      if (!c) return lock(brgy, 'Choose a city first');
+      lock(brgy, 'Loading barangays…');
+      try {
+        if (!brgyCache.has(c.id)) brgyCache.set(c.id, await fetch(`/api/ph/barangays/${encodeURIComponent(c.id)}`).then((r) => r.json()));
+        if (C() !== c) return;
+        brgy.innerHTML = options(brgyCache.get(c.id), 'Choose a barangay'); brgy.disabled = false;
+      } catch { lock(brgy, 'Couldn’t load barangays. Choose the city again.'); }
+    });
+    loadPH().then((d) => { region.innerHTML = options(d.regions.map((r) => r.n), 'Choose a region'); })
+      .catch(() => { region.innerHTML = '<option value="">The list couldn’t load. Refresh the page.</option>'; });
+  }
+  function addressParts(key) {
+    const box = form.querySelector(`fieldset[data-addr="${key}"]`);
+    if (!box) return null;
+    const v = (p) => box.querySelector(`[data-part="${p}"]`).value.trim();
+    const zipText = box.querySelector('[data-part="zipText"]');
+    return { street: v('street'), region: v('region'), province: v('province'), city: v('city'), barangay: v('barangay'), zip: zipText.hidden ? v('zip') : zipText.value.trim() };
+  }
+
+  // ---------- the page ----------
+  function showNotice(title, text, bad) {
+    const n = $('notice');
+    n.innerHTML = `${title ? `<b>${esc(title)}</b>` : ''}${esc(text || '')}`;
+    n.classList.toggle('bad', Boolean(bad));
+    n.hidden = false;
+  }
+
+  function render() {
+    const d = ev.details;
+    document.title = PREVIEW ? `Preview: ${d.name}` : `Register for ${d.name}`;
+    applyBranding(ev.branding);
+    $('evName').textContent = d.name;
+    $('evDate').textContent = d.date || '';
+    $('evVenue').textContent = d.venue || '';
+    $('intro').innerHTML = EG.richText(d.intro);
+    $('bEvent').textContent = ev.badge.showEventName ? d.name : '';
+    $('bEvent').hidden = !ev.badge.showEventName;
+    $('bWhen').textContent = d.date || '';
+    $('strapText').textContent = Array(6).fill(d.name).join('  ');
+    $('notice').hidden = true;
+    $('badgeCol').hidden = false;
+    $('wrap').classList.remove('single');
+    if (!issued) renderForm();
+
+    const closed = ev.status === 'closed' || ev.status === 'archived' || ev.full;
+    canSubmit = !closed && !PREVIEW;
+    form.hidden = closed || issued;
+    if (ev.status === 'archived') showNotice('This event has ended.', 'Thank you for your interest.');
+    else if (ev.full && ev.status === 'open') showNotice('Registration is full.', 'Sorry, this event has reached its capacity.');
+    else if (ev.status === 'closed') showNotice('Registration is closed.', ev.form.closedMessage);
+    else if (PREVIEW) showNotice('Preview', 'This is how the registration page will look. Registrations made here are not saved.');
+    if (closed) { $('badgeCol').hidden = true; $('wrap').classList.add('single'); }
+  }
+
+  function notFound() {
+    document.title = 'Event not found';
+    $('evName').textContent = 'Event not found';
+    $('intro').innerHTML = '<p>We couldn’t find this event. Check the link in your invitation, or contact the organizer.</p>';
+    $('wrap').classList.add('single');
+  }
+
+  async function load() {
+    if (PREVIEW) return; // the admin sends the settings being edited
+    try {
+      const r = await fetch(`/api/e/${encodeURIComponent(slug)}`, { headers: { accept: 'application/json' } });
+      if (r.status === 404) return notFound();
+      if (!r.ok) throw new Error(r.status);
+      ev = await r.json();
+      render();
+    } catch {
+      showNotice('Registration is unavailable right now.', 'The server could not be reached. Refresh the page in a minute.', true);
+    }
+  }
+  window.addEventListener('message', (e) => {
+    if (!PREVIEW || e.origin !== location.origin || !e.data || e.data.type !== 'eg-preview') return;
+    const keep = collectRaw();
+    ev = e.data.event;
+    issued = false;
+    $('done').hidden = true;
+    render();
+    restoreRaw(keep);
+  });
+
+  // ---------- live badge ----------
+  const isRadio = (el) => el instanceof RadioNodeList || el.type === 'radio';
+  const radioValue = (el) => (el instanceof RadioNodeList ? el.value : el.checked ? el.value : '');
+  const valueOf = (key) => {
+    const parts = addressParts(key);
+    if (parts) return EG.shortAddress(parts);
+    const el = form.elements[key];
+    if (!el) return '';
+    if (isRadio(el)) return radioValue(el) || '';
+    if (el.type === 'checkbox') return el.checked ? 'Yes' : '';
+    if (el.dataset && 'phonePh' in el.dataset) return el.value ? `+63 ${el.value}` : '';
+    return el.value.trim();
+  };
+  const labelOf = (key) => (fields.find((f) => f.key === key) || {}).label || '';
+  function setBadgeText(el, value, placeholder) {
+    el.textContent = value || placeholder;
+    el.classList.toggle('ghost', !value);
+    el.hidden = !value && !placeholder;
+  }
+  function syncBadge() {
+    if (issued || !ev) return;
+    setBadgeText($('bName'), `${valueOf('first_name')} ${valueOf('last_name')}`.trim(), 'Your name');
+    setBadgeText($('bL2'), ev.badge.line2 ? valueOf(ev.badge.line2) : '', ev.badge.line2 ? labelOf(ev.badge.line2) : '');
+    setBadgeText($('bL3'), ev.badge.line3 ? valueOf(ev.badge.line3) : '', ev.badge.line3 ? labelOf(ev.badge.line3) : '');
+  }
+  const fieldKeyOf = (el) => el.name || (el.closest('[data-addr]') || { dataset: {} }).dataset.addr;
+  form.addEventListener('input', (e) => {
+    syncBadge();
+    const k = fieldKeyOf(e.target);
+    if (k) setError(k, '');
+  });
+  form.addEventListener('change', (e) => { syncBadge(); const k = fieldKeyOf(e.target); if (k) setError(k, ''); });
+
+  // keep typed answers when the preview settings change
+  function collectRaw() { const o = {}; fields.forEach((f) => { if (f.type !== 'address_ph') o[f.key] = valueOf(f.key); }); return o; }
+  function restoreRaw(o) {
+    for (const [k, v] of Object.entries(o || {})) {
+      const el = form.elements[k];
+      if (!el || !v) continue;
+      if (el instanceof RadioNodeList) el.value = v;
+      else if (el.type === 'radio') el.checked = el.value === v;
+      else if (el.type === 'checkbox') el.checked = v === 'Yes';
+      else el.value = el.dataset && 'phonePh' in el.dataset ? v.replace(/^\+63 /, '') : v;
+    }
+    syncBadge();
+  }
+
+  // ---------- validation (the same rules the server uses) ----------
+  function setError(name, msg) {
+    const err = $(`${name}-err`);
+    if (err) err.textContent = msg || '';
+    const box = err && err.closest('.field');
+    if (box) box.classList.toggle('invalid', Boolean(msg));
+    const el = form.elements[name];
+    const input = el instanceof RadioNodeList ? el[0] : el;
+    if (input && input.setAttribute) input.setAttribute('aria-invalid', msg ? 'true' : 'false');
+  }
+  function collect() {
+    const data = {};
+    fields.forEach((f) => {
+      if (f.type === 'address_ph') { data[f.key] = addressParts(f.key); return; }
+      const el = form.elements[f.key];
+      if (!el) return;
+      data[f.key] = isRadio(el) ? radioValue(el) : el.type === 'checkbox' ? el.checked : el.value;
+    });
+    data.consent = $('consent').checked;
+    return data;
+  }
+  function showErrors(errors) {
+    const keys = [...fields.map((f) => f.key), 'consent'];
+    keys.forEach((k) => setError(k, errors[k]));
+    const first = keys.find((k) => errors[k]);
+    if (!first) return;
+    const box = form.querySelector(`fieldset[data-addr="${first}"]`);
+    if (box) { const empty = [...box.querySelectorAll('input:not([hidden]), select:not([disabled])')].find((x) => !x.value) || box.querySelector('input'); empty.focus(); return; }
+    const el = first === 'consent' ? $('consent') : form.elements[first];
+    (el instanceof RadioNodeList ? el[0] : el).focus();
+  }
+  function formMessage(text, kind) {
+    $('formMsg').textContent = text || '';
+    $('formMsg').classList.toggle('info', kind === 'info');
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    formMessage('');
+    const data = collect();
+    const { errors } = EG.checkSubmission({ form: { fields, consent: ev.form.consent } }, data);
+    if (Object.keys(errors).length) return showErrors(errors);
+    if (!canSubmit) return formMessage(PREVIEW ? 'This is a preview, so the form isn’t submitted. Everything looks valid.' : 'Registration is closed.', 'info');
+
+    const btn = $('submit');
+    btn.disabled = true;
+    btn.textContent = 'Registering…';
+    try {
+      const r = await fetch(`/api/e/${encodeURIComponent(slug)}/register`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(data) });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 201) return issuePass(body);
+      if (r.status === 422 && body.errors) return showErrors(body.errors);
+      if (r.status === 409) return formMessage(body.message || 'This email is already registered.', 'info');
+      if (r.status === 403 && body.closed) { ev.status = 'closed'; ev.form.closedMessage = body.message; return render(); }
+      formMessage(body.message || 'Registration failed. Check your connection and try again.');
+    } catch {
+      formMessage('Registration failed because the server could not be reached. Check your connection and try again.');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = ev.form.submitLabel;
+    }
+  });
+
+  // ---------- success ----------
+  function flip(card, swap) {
+    if (reduceMotion || !card.animate) { swap(); return; }
+    const half = { duration: 220, easing: 'ease-in', fill: 'forwards' };
+    card.animate([{ transform: 'rotateY(0deg)' }, { transform: 'rotateY(90deg)' }], half).onfinish = () => {
+      swap();
+      card.animate([{ transform: 'rotateY(-90deg)' }, { transform: 'rotateY(0deg)' }], { ...half, easing: 'ease-out' });
+    };
+  }
+  function issuePass(p) {
+    issued = true;
+    const card = $('card');
+    flip(card, () => {
+      card.classList.add('issued');
+      const img = new Image();
+      img.alt = `QR pass for ${p.fullName}`;
+      img.src = p.qr;
+      $('bQr').replaceChildren(img);
+      $('bCodeVal').textContent = p.passCode;
+      $('bCode').hidden = false;
+    });
+    const dl = $('download');
+    dl.href = p.qr;
+    dl.download = `event-pass-${p.passCode}.png`;
+    $('doneTitle').textContent = ev.form.successTitle;
+    if (p.emailSent) {
+      $('doneMsg').textContent = `We've emailed your QR pass to ${p.email}. Show it at the registration desk when you arrive.`;
+      $('doneHint').textContent = "If it hasn't arrived within a few minutes, check your spam folder, or download the pass below.";
+    } else {
+      $('doneMsg').textContent = `Your registration is saved, but the email to ${p.email} couldn't be sent.`;
+      $('doneHint').textContent = `Download your pass now and bring it on the day. Your pass code is ${p.passCode}.`;
+    }
+    form.hidden = true;
+    $('done').hidden = false;
+    $('doneTitle').focus();
+  }
+
+  $('again').addEventListener('click', () => {
+    issued = false;
+    form.reset();
+    [...fields.map((f) => f.key), 'consent'].forEach((k) => setError(k, ''));
+    formMessage('');
+    $('card').classList.remove('issued');
+    $('bQr').textContent = 'Your QR pass appears here after you register';
+    $('bCode').hidden = true;
+    syncBadge();
+    $('done').hidden = true;
+    form.hidden = false;
+    const first = form.querySelector('input, select, textarea');
+    if (first) first.focus();
+  });
+
+  load();
+  if (PREVIEW && window.parent !== window) window.parent.postMessage({ type: 'eg-preview-ready' }, location.origin);
+})();
+</script>
+</body>
+</html>
