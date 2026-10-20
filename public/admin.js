@@ -123,6 +123,7 @@
   async function start(user) {
     me = user;
     document.documentElement.dataset.role = me.role;
+    document.documentElement.dataset.charts = me.canCharts ? 'yes' : 'no';
     $('loginView').hidden = true; $('appView').hidden = false;
     $('whoName').textContent = me.name;
     $('whoRole').textContent = isOwner() ? 'Admin' : 'Client';
@@ -255,12 +256,13 @@
     $('userRows').innerHTML = users.length ? users.map((u) => `<tr data-id="${u.id}">
       <td><b>${esc(u.name)}</b><span class="small">${esc(u.username)}</span></td>
       <td>${u.events.map((e) => esc(e.name)).join('<br>') || '<span style="color:var(--muted)">None</span>'}</td>
-      <td>${u.canExport ? 'Allowed' : '<span style="color:var(--muted)">Not allowed</span>'}</td>
+      <td>${[u.canExport ? 'Download' : '', u.canCharts ? 'Charts' : ''].filter(Boolean).join(' · ') || '<span style="color:var(--muted)">View only</span>'}</td>
       <td>${u.active ? `<span class="badge in">${ICON.check}Active</span>` : '<span class="badge off">Turned off</span>'}</td>
       <td class="num">${u.lastLoginAt ? esc(dateTimeOf(u.lastLoginAt)) : '<span style="color:var(--muted)">Never</span>'}</td>
       <td><div class="row-actions">
         <button class="btn btn-quiet btn-sm" type="button" data-act="events">Events…</button>
         <button class="btn btn-quiet btn-sm" type="button" data-act="export">${u.canExport ? 'Block download' : 'Allow download'}</button>
+        <button class="btn btn-quiet btn-sm" type="button" data-act="charts">${u.canCharts ? 'Block charts' : 'Allow charts'}</button>
         <button class="btn btn-quiet btn-sm" type="button" data-act="pw">Reset password</button>
         <button class="btn btn-quiet btn-sm" type="button" data-act="active">${u.active ? 'Turn off' : 'Turn on'}</button>
         <button class="btn btn-quiet btn-sm btn-danger-text" type="button" data-act="delete">Delete</button>
@@ -280,11 +282,11 @@
   $('userForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('uErr').textContent = '';
-    const body = { name: $('uName').value.trim(), username: $('uUser').value.trim(), password: $('uPw').value, canExport: $('uExport').checked, events: checkedIds($('userForm'), 'uEv') };
+    const body = { name: $('uName').value.trim(), username: $('uUser').value.trim(), password: $('uPw').value, canExport: $('uExport').checked, canCharts: $('uCharts').checked, events: checkedIds($('userForm'), 'uEv') };
     try {
       const u = await post('/api/admin/users', body);
       showCreated('User added.', u.name, u.username, body.password);
-      $('userForm').reset(); $('uExport').checked = true;
+      $('userForm').reset(); $('uExport').checked = true; $('uCharts').checked = false;
       reloadUsers();
     } catch (err) { if (err.message !== 'signed out') $('uErr').textContent = err.message; }
   });
@@ -304,6 +306,8 @@
       });
     } else if (act === 'export') {
       patch({ canExport: !u.canExport }).then(reloadUsers).catch((err) => alert(err.message));
+    } else if (act === 'charts') {
+      patch({ canCharts: !u.canCharts }).then(reloadUsers).catch((err) => alert(err.message));
     } else if (act === 'pw') {
       openDialog({
         title: `Reset password for ${u.name}`,
@@ -362,7 +366,7 @@
       ? 'Moves the event back to the Active list with registration closed. You can reopen registration in Settings.'
       : 'Closes registration and check-in and moves the event to the Archived list. Records, dashboard and backups are kept.';
     $('archiveBtn').textContent = cur.status === 'archived' ? 'Restore…' : 'Archive…';
-    $('anIntro').textContent = isOwner() ? 'Charts you add here are saved for everyone who views this event and update live.' : 'Charts prepared by the event organizer. They update live.';
+    $('anIntro').textContent = me.canCharts ? 'Charts you add here are saved for everyone who views this event and update live.' : 'Charts prepared by the event organizer. They update live.';
   }
 
   async function showEvent(id, which) {

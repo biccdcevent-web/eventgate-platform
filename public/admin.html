@@ -158,6 +158,7 @@
   .pw-row { display: flex; gap: 8px; }
   .pw-row input { flex: 1; min-width: 0; font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace !important; }
   .check { display: flex; align-items: flex-start; gap: .55rem; font-size: .92rem; cursor: pointer; }
+  .field label.check { font-weight: 400; font-size: .92rem; margin: 0; }
   .check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--cobalt); flex: none; }
   .checks { display: flex; flex-direction: column; gap: 8px; }
   .form-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
@@ -355,7 +356,7 @@
   dialog.dlg .body p { margin: 0 0 8px; }
   dialog.dlg .body b { color: var(--ink); }
   dialog.dlg .foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
-  [data-role="client"] #anAdd, [data-role="client"] [data-act="remove"] { display: none !important; }
+  [data-charts="no"] #anAdd, [data-charts="no"] [data-act="remove"] { display: none !important; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -421,7 +422,7 @@
     <div class="page-head"><div><p class="kicker">Client access</p><h1>Users</h1></div></div>
     <section class="card" aria-labelledby="newUserTitle">
       <h2 id="newUserTitle">Add a client user</h2>
-      <p class="sub">Client users can sign in and view the dashboards of the events you choose. They can't change settings, add charts, manage users, or reset or delete records.</p>
+      <p class="sub">Client users can sign in and view the dashboards of the events you choose. You can also let them add their own dashboard charts. They can't change event settings, manage users, or reset or delete records.</p>
       <form id="userForm" novalidate>
         <div class="form-grid three">
           <div class="field"><label for="uName">Name</label><input id="uName" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Maria Santos"></div>
@@ -430,7 +431,8 @@
         </div>
         <div class="field" style="margin-top:14px"><span class="lbl">Events this user can view</span><div class="checks" id="uEvents"></div></div>
         <div class="form-foot">
-          <label class="check"><input type="checkbox" id="uExport" checked> Can download the attendee list (Excel)</label>
+          <div class="checks"><label class="check"><input type="checkbox" id="uExport" checked> Can download the attendee list (Excel)</label>
+          <label class="check"><input type="checkbox" id="uCharts"> Can add and remove dashboard charts</label></div>
           <button class="btn btn-primary" type="submit">Add user</button>
         </div>
         <p class="err" id="uErr" role="alert"></p>
@@ -442,7 +444,7 @@
       <p class="sub">Turning a user off or resetting their password signs them out immediately.</p>
       <div class="table-box">
         <table class="list">
-          <thead><tr><th scope="col">Name</th><th scope="col">Events</th><th scope="col">Download</th><th scope="col">Status</th><th scope="col">Last sign-in</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <thead><tr><th scope="col">Name</th><th scope="col">Events</th><th scope="col">Permissions</th><th scope="col">Status</th><th scope="col">Last sign-in</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
           <tbody id="userRows"></tbody>
         </table>
       </div>
