@@ -292,7 +292,7 @@ const userQ = {
   list: db.prepare('SELECT * FROM users ORDER BY name COLLATE NOCASE'),
   byId: db.prepare('SELECT * FROM users WHERE id = ?'),
   byUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
-  insert: db.prepare('INSERT INTO users (name, username, password_hash, can_export) VALUES (@name, @username, @password_hash, @can_export)'),
+  insert: db.prepare('INSERT INTO users (name, username, password_hash, can_export, can_charts) VALUES (@name, @username, @password_hash, @can_export, @can_charts)'),
   loggedIn: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
   remove: db.prepare('DELETE FROM users WHERE id = ?'),
   events: db.prepare('SELECT event_id FROM user_events WHERE user_id = ?'),
@@ -307,7 +307,7 @@ function setUserEvents(uid, ids) {
 }
 
 const OWNER_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
-const OWNER = { role: 'owner', id: 0, name: 'Administrator', username: OWNER_USERNAME, canExport: true, eventIds: null };
+const OWNER = { role: 'owner', id: 0, name: 'Administrator', username: OWNER_USERNAME, canExport: true, canCharts: true, eventIds: null };
 
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16);
@@ -343,7 +343,7 @@ function getAuth(req) {
   if (uid === '0') return ADMIN_KEY && ver === ownerVer() ? OWNER : null;
   const u = userQ.byId.get(Number(uid));
   if (!u || !u.active || String(u.session_ver) !== ver) return null;
-  return { role: 'client', id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), eventIds: userEventIds(u.id) };
+  return { role: 'client', id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), eventIds: userEventIds(u.id) };
 }
 const canSee = (auth, eventId) => auth.role === 'owner' || auth.eventIds.includes(Number(eventId));
 
@@ -370,7 +370,7 @@ const withEvent = (req, res, next) => {
   req.ev = ev;
   next();
 };
-const publicUser = (a) => ({ name: a.name, username: a.username, role: a.role, canExport: a.canExport });
+const publicUser = (a) => ({ name: a.name, username: a.username, role: a.role, canExport: a.canExport, canCharts: a.canCharts });
 
 app.post('/api/admin/login', adminKeyLimiter, (req, res) => {
   const b = req.body || {};
@@ -388,7 +388,7 @@ app.post('/api/admin/login', adminKeyLimiter, (req, res) => {
   if (!u.active) return res.status(403).json({ message: 'This account is turned off. Contact the event administrator.' });
   userQ.loggedIn.run(u.id);
   setSession(req, res, u.id, u.session_ver);
-  res.json({ ok: true, user: publicUser({ role: 'client', name: u.name, username: u.username, canExport: Boolean(u.can_export) }) });
+  res.json({ ok: true, user: publicUser({ role: 'client', name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts) }) });
 });
 app.post('/api/admin/logout', (req, res) => { setSession(req, res, null); res.json({ ok: true }); });
 app.get('/api/admin/session', (req, res) => {
@@ -419,7 +419,7 @@ app.post('/api/admin/me/password', adminKeyLimiter, requireSignedIn, (req, res) 
 const eventNames = () => new Map(evQ.all.all().map((r) => [r.id, loadEvent(r).config.details.name]));
 function userOut(u, names = eventNames()) {
   return {
-    id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), active: Boolean(u.active),
+    id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), active: Boolean(u.active),
     createdAt: sqlTimeToIso(u.created_at), lastLoginAt: sqlTimeToIso(u.last_login_at),
     events: userEventIds(u.id).filter((id) => names.has(id)).map((id) => ({ id, name: names.get(id) })),
   };
@@ -440,7 +440,7 @@ app.post('/api/admin/users', requireOwner, (req, res) => {
   if (problem) return res.status(422).json({ message: problem, field: 'password' });
   const events = idList(b.events);
   if (!events.length) return res.status(422).json({ message: 'Choose at least one event this user can view.', field: 'events' });
-  const id = userQ.insert.run({ name, username, password_hash: hashPassword(b.password), can_export: b.canExport === false ? 0 : 1 }).lastInsertRowid;
+  const id = userQ.insert.run({ name, username, password_hash: hashPassword(b.password), can_export: b.canExport === false ? 0 : 1, can_charts: b.canCharts ? 1 : 0 }).lastInsertRowid;
   setUserEvents(id, events);
   res.status(201).json(userOut(userQ.byId.get(id)));
 });
@@ -449,13 +449,14 @@ app.patch('/api/admin/users/:uid', requireOwner, (req, res) => {
   const u = userQ.byId.get(Number(req.params.uid));
   if (!u) return res.status(404).json({ message: 'That user no longer exists.' });
   const b = req.body || {};
-  const next = { name: u.name, can_export: u.can_export, active: u.active, password_hash: u.password_hash, session_ver: u.session_ver };
+  const next = { name: u.name, can_export: u.can_export, can_charts: u.can_charts, active: u.active, password_hash: u.password_hash, session_ver: u.session_ver };
   if (b.name !== undefined) {
     const name = String(b.name).replace(/\s+/g, ' ').trim();
     if (name.length < 2 || name.length > 80) return res.status(422).json({ message: 'Enter a name of 2 to 80 characters.' });
     next.name = name;
   }
   if (b.canExport !== undefined) next.can_export = b.canExport ? 1 : 0;
+  if (b.canCharts !== undefined) next.can_charts = b.canCharts ? 1 : 0;
   if (b.active !== undefined) { next.active = b.active ? 1 : 0; if (!next.active) next.session_ver += 1; }
   if (b.password !== undefined) {
     const problem = passwordProblem(b.password);
@@ -468,7 +469,7 @@ app.patch('/api/admin/users/:uid', requireOwner, (req, res) => {
     if (!events.length) return res.status(422).json({ message: 'Choose at least one event this user can view.' });
     setUserEvents(u.id, events);
   }
-  db.prepare('UPDATE users SET name = @name, can_export = @can_export, active = @active, password_hash = @password_hash, session_ver = @session_ver WHERE id = @id').run({ ...next, id: u.id });
+  db.prepare('UPDATE users SET name = @name, can_export = @can_export, can_charts = @can_charts, active = @active, password_hash = @password_hash, session_ver = @session_ver WHERE id = @id').run({ ...next, id: u.id });
   bus.emit('change', { type: 'sessions' });
   res.json(userOut(userQ.byId.get(u.id)));
 });
@@ -796,7 +797,9 @@ const CHART_OPTIONS = {
 const BUILTIN_DIMS = ['company', 'designation', 'emailDomain', 'status', 'regDay', 'regWeekday', 'regHour', 'arrival15', 'arrivalHour'];
 
 app.get('/api/admin/events/:id/charts', ...ev$, (req, res) => res.json(chartQ.list.all(req.ev.id)));
-app.post('/api/admin/events/:id/charts', ...evOwner$, (req, res) => {
+// Charts can be added and removed by the administrator and by client users allowed to (per user, on the Users page).
+const chartEditor = (req, res, next) => (req.auth.canCharts ? next() : res.status(403).json({ message: 'Your account can view charts but not change them. Ask the event administrator.' }));
+app.post('/api/admin/events/:id/charts', ...ev$, chartEditor, (req, res) => {
   const b = req.body || {};
   const c = { event_id: req.ev.id, title: String(b.title || '').replace(/\s+/g, ' ').trim().slice(0, 80), dimension: b.dimension, metric: b.metric, chart_type: b.chartType, filter: b.filter || 'all' };
   if (!BUILTIN_DIMS.includes(c.dimension) && !/^f:[a-z0-9_]{1,48}(@(region|province|city))?$/.test(String(c.dimension))) return res.status(422).json({ message: 'Choose a valid dimension.' });
@@ -807,7 +810,7 @@ app.post('/api/admin/events/:id/charts', ...evOwner$, (req, res) => {
   bus.emit('change', { type: 'charts', eventId: req.ev.id });
   res.status(201).json({ id });
 });
-app.delete('/api/admin/events/:id/charts/:cid', ...evOwner$, (req, res) => {
+app.delete('/api/admin/events/:id/charts/:cid', ...ev$, chartEditor, (req, res) => {
   chartQ.remove.run(Number(req.params.cid), req.ev.id);
   bus.emit('change', { type: 'charts', eventId: req.ev.id });
   res.json({ ok: true });

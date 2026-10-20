@@ -99,6 +99,8 @@ function openDb(dbPath, env = process.env) {
       PRIMARY KEY (user_id, event_id)
     );
   `);
+  // Added later: client users the administrator allows to add and remove dashboard charts.
+  if (!cols('users').includes('can_charts')) db.exec('ALTER TABLE users ADD COLUMN can_charts INTEGER NOT NULL DEFAULT 0');
   if (!hasTable('saved_charts')) {
     db.exec(`CREATE TABLE saved_charts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, dimension TEXT NOT NULL,
