@@ -292,7 +292,7 @@ const userQ = {
   list: db.prepare('SELECT * FROM users ORDER BY name COLLATE NOCASE'),
   byId: db.prepare('SELECT * FROM users WHERE id = ?'),
   byUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
-  insert: db.prepare('INSERT INTO users (name, username, password_hash, can_export, can_charts) VALUES (@name, @username, @password_hash, @can_export, @can_charts)'),
+  insert: db.prepare('INSERT INTO users (name, username, password_hash, can_export, can_charts, must_change_pw) VALUES (@name, @username, @password_hash, @can_export, @can_charts, 1)'),
   loggedIn: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
   remove: db.prepare('DELETE FROM users WHERE id = ?'),
   events: db.prepare('SELECT event_id FROM user_events WHERE user_id = ?'),
@@ -343,7 +343,7 @@ function getAuth(req) {
   if (uid === '0') return ADMIN_KEY && ver === ownerVer() ? OWNER : null;
   const u = userQ.byId.get(Number(uid));
   if (!u || !u.active || String(u.session_ver) !== ver) return null;
-  return { role: 'client', id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), eventIds: userEventIds(u.id) };
+  return { role: 'client', id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), mustChange: Boolean(u.must_change_pw), eventIds: userEventIds(u.id) };
 }
 const canSee = (auth, eventId) => auth.role === 'owner' || auth.eventIds.includes(Number(eventId));
 
@@ -354,9 +354,13 @@ function setSession(req, res, uid, ver) {
   res.set('Set-Cookie', `${SESSION_COOKIE}=${uid}.${ver}.${exp}.${sessionSig(uid, ver, exp)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MS / 1000}${secure}`);
 }
 
+// A client still using the temporary password from the administrator must choose their own before anything else.
+const mustChangeFirst = (res) => res.status(403).json({ message: 'Choose your own password first.', mustChange: true });
 const requireSignedIn = (req, res, next) => {
   req.auth = getAuth(req);
-  return req.auth ? next() : res.status(401).json({ message: 'Sign in to continue.' });
+  if (!req.auth) return res.status(401).json({ message: 'Sign in to continue.' });
+  if (req.auth.mustChange && !req.allowTemporaryPassword) return mustChangeFirst(res);
+  next();
 };
 const requireOwner = (req, res, next) => {
   req.auth = getAuth(req);
@@ -370,7 +374,7 @@ const withEvent = (req, res, next) => {
   req.ev = ev;
   next();
 };
-const publicUser = (a) => ({ name: a.name, username: a.username, role: a.role, canExport: a.canExport, canCharts: a.canCharts });
+const publicUser = (a) => ({ name: a.name, username: a.username, role: a.role, canExport: a.canExport, canCharts: a.canCharts, mustChange: Boolean(a.mustChange) });
 
 app.post('/api/admin/login', adminKeyLimiter, (req, res) => {
   const b = req.body || {};
@@ -388,7 +392,7 @@ app.post('/api/admin/login', adminKeyLimiter, (req, res) => {
   if (!u.active) return res.status(403).json({ message: 'This account is turned off. Contact the event administrator.' });
   userQ.loggedIn.run(u.id);
   setSession(req, res, u.id, u.session_ver);
-  res.json({ ok: true, user: publicUser({ role: 'client', name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts) }) });
+  res.json({ ok: true, user: publicUser({ role: 'client', name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), mustChange: Boolean(u.must_change_pw) }) });
 });
 app.post('/api/admin/logout', (req, res) => { setSession(req, res, null); res.json({ ok: true }); });
 app.get('/api/admin/session', (req, res) => {
@@ -402,14 +406,15 @@ function passwordProblem(pw) {
   return '';
 }
 
-app.post('/api/admin/me/password', adminKeyLimiter, requireSignedIn, (req, res) => {
+app.post('/api/admin/me/password', adminKeyLimiter, (req, res, next) => { req.allowTemporaryPassword = true; next(); }, requireSignedIn, (req, res) => {
   if (req.auth.role === 'owner') return res.status(422).json({ message: 'The administrator password is the ADMIN_KEY setting on Render.' });
   const u = userQ.byId.get(req.auth.id);
   const b = req.body || {};
-  if (!passwordMatches(b.current, u.password_hash)) return res.status(401).json({ message: 'Your current password is incorrect.' });
+  if (!passwordMatches(b.current, u.password_hash)) return res.status(422).json({ message: u.must_change_pw ? 'The temporary password is incorrect.' : 'Your current password is incorrect.', field: 'current' });
   const problem = passwordProblem(b.next);
   if (problem) return res.status(422).json({ message: problem });
-  db.prepare('UPDATE users SET password_hash = ?, session_ver = session_ver + 1 WHERE id = ?').run(hashPassword(b.next), u.id);
+  if (b.next === b.current) return res.status(422).json({ message: 'Choose a password different from the current one.' });
+  db.prepare('UPDATE users SET password_hash = ?, must_change_pw = 0, session_ver = session_ver + 1 WHERE id = ?').run(hashPassword(b.next), u.id);
   setSession(req, res, u.id, u.session_ver + 1);
   bus.emit('change', { type: 'sessions' });
   res.json({ ok: true });
@@ -420,7 +425,7 @@ const eventNames = () => new Map(evQ.all.all().map((r) => [r.id, loadEvent(r).co
 function userOut(u, names = eventNames()) {
   return {
     id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), active: Boolean(u.active),
-    createdAt: sqlTimeToIso(u.created_at), lastLoginAt: sqlTimeToIso(u.last_login_at),
+    createdAt: sqlTimeToIso(u.created_at), lastLoginAt: sqlTimeToIso(u.last_login_at), temporaryPassword: Boolean(u.must_change_pw),
     events: userEventIds(u.id).filter((id) => names.has(id)).map((id) => ({ id, name: names.get(id) })),
   };
 }
@@ -449,7 +454,7 @@ app.patch('/api/admin/users/:uid', requireOwner, (req, res) => {
   const u = userQ.byId.get(Number(req.params.uid));
   if (!u) return res.status(404).json({ message: 'That user no longer exists.' });
   const b = req.body || {};
-  const next = { name: u.name, can_export: u.can_export, can_charts: u.can_charts, active: u.active, password_hash: u.password_hash, session_ver: u.session_ver };
+  const next = { name: u.name, can_export: u.can_export, can_charts: u.can_charts, active: u.active, password_hash: u.password_hash, session_ver: u.session_ver, must_change_pw: u.must_change_pw };
   if (b.name !== undefined) {
     const name = String(b.name).replace(/\s+/g, ' ').trim();
     if (name.length < 2 || name.length > 80) return res.status(422).json({ message: 'Enter a name of 2 to 80 characters.' });
@@ -463,13 +468,14 @@ app.patch('/api/admin/users/:uid', requireOwner, (req, res) => {
     if (problem) return res.status(422).json({ message: problem });
     next.password_hash = hashPassword(b.password);
     next.session_ver += 1;
+    next.must_change_pw = 1; // a password set by the administrator is temporary
   }
   if (b.events !== undefined) {
     const events = idList(b.events);
     if (!events.length) return res.status(422).json({ message: 'Choose at least one event this user can view.' });
     setUserEvents(u.id, events);
   }
-  db.prepare('UPDATE users SET name = @name, can_export = @can_export, can_charts = @can_charts, active = @active, password_hash = @password_hash, session_ver = @session_ver WHERE id = @id').run({ ...next, id: u.id });
+  db.prepare('UPDATE users SET name = @name, can_export = @can_export, can_charts = @can_charts, active = @active, password_hash = @password_hash, session_ver = @session_ver, must_change_pw = @must_change_pw WHERE id = @id').run({ ...next, id: u.id });
   bus.emit('change', { type: 'sessions' });
   res.json(userOut(userQ.byId.get(u.id)));
 });
@@ -772,6 +778,7 @@ const fileSlug = (ev) => ev.slug.replace(/[^a-z0-9-]/g, '');
 app.get('/api/admin/events/:id/registrations.csv', adminKeyLimiter, (req, res, next) => {
   req.auth = getAuth(req);
   if (!req.auth) return res.status(401).send('Unauthorized');
+  if (req.auth.mustChange) return res.status(403).send('Choose your own password first.');
   if (!req.auth.canExport) return res.status(403).send('Downloading the attendee list is not enabled for this account.');
   next();
 }, withEvent, (req, res) => {

@@ -100,6 +100,8 @@ function openDb(dbPath, env = process.env) {
     );
   `);
   // Added later: client users the administrator allows to add and remove dashboard charts.
+  // Added later: 1 while the user still has the temporary password the administrator set.
+  if (!cols('users').includes('must_change_pw')) db.exec('ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0');
   if (!cols('users').includes('can_charts')) db.exec('ALTER TABLE users ADD COLUMN can_charts INTEGER NOT NULL DEFAULT 0');
   if (!hasTable('saved_charts')) {
     db.exec(`CREATE TABLE saved_charts (
