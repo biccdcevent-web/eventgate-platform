@@ -22,6 +22,7 @@
     arrivalHour: { label: 'Arrival time (hour)', kind: 'ordinal', arrival: true, noun: 'arrival hour' },
   };
   let DIMS = { ...BASE_DIMS };
+  let CK = true;   // the event uses check-in
   const CAT_TYPES = ['text', 'select', 'radio', 'checkbox', 'number'];
   function buildDims(ev) {
     const fields = (ev && ev.config && ev.config.form && ev.config.form.fields) || [];
@@ -40,7 +41,10 @@
       if (!f.enabled || !CAT_TYPES.includes(f.type) || EG.BUILTIN.includes(f.key)) continue;
       d[`f:${f.key}`] = { label: f.label, kind: 'cat', noun: f.label.toLowerCase(), field: f.key };
     }
-    for (const k of ['emailDomain', 'status', 'regDay', 'regWeekday', 'regHour', 'arrival15', 'arrivalHour']) d[k] = BASE_DIMS[k];
+    CK = !(ev && ev.config && ev.config.checkin) || ev.config.checkin.enabled;
+    // Without check-in there is nothing to say about arrivals or attendance.
+    const keys = CK ? ['emailDomain', 'status', 'regDay', 'regWeekday', 'regHour', 'arrival15', 'arrivalHour'] : ['emailDomain', 'regDay', 'regWeekday', 'regHour'];
+    for (const k of keys) d[k] = BASE_DIMS[k];
     return d;
   }
   const METRICS = {
@@ -59,6 +63,7 @@
 
   function allowedMetrics(dim) {
     const d = DIMS[dim];
+    if (!CK) return ['count'];
     if (d.arrival) return ['checkedIn'];
     if (d.kind === 'status') return ['count'];
     if (d.kind === 'time') return ['count', 'checkedIn'];
@@ -72,7 +77,7 @@
     if (d.kind === 'status') return ['bar', 'column'];      // a two-slice pie is better as bars
     return ['bar', 'column', 'pie'];
   }
-  const filterApplies = (dim, metric) => !DIMS[dim].arrival && DIMS[dim].kind !== 'status' && metric !== 'rate' && metric !== 'stacked';
+  const filterApplies = (dim, metric) => CK && !DIMS[dim].arrival && DIMS[dim].kind !== 'status' && metric !== 'rate' && metric !== 'stacked';
 
   function autoTitle(c) {
     const d = DIMS[c.dimension];
@@ -446,7 +451,7 @@
   function missingCard(c) {
     const card = document.createElement('section');
     card.className = 'card span-6 an-card';
-    card.innerHTML = `<div class="an-head"><div><h2>${esc(c.title)}</h2><p class="sub">This chart uses a form field that is no longer on the registration form.</p></div>
+    card.innerHTML = `<div class="an-head"><div><h2>${esc(c.title)}</h2><p class="sub">${CK ? 'This chart uses a form field that is no longer on the registration form.' : 'This chart is about check-ins, which this event doesn’t use.'}</p></div>
       <div class="an-actions"><button class="icon-btn" type="button" data-act="remove" aria-label="Remove ${esc(c.title)}" title="Remove chart"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M10 11v6M14 11v6M6 7l1 12h10l1-12M9 7V4h6v3"/></svg></button></div></div>`;
     return card;
   }
@@ -483,7 +488,7 @@
     box.innerHTML = '';
     $('anEmpty').hidden = charts.length > 0;
     for (const c of charts) {
-      if (!DIMS[c.dimension]) {
+      if (!DIMS[c.dimension] || !allowedMetrics(c.dimension).includes(c.metric)) {
         const card = missingCard(c);
         box.appendChild(card);
         card.querySelector('[data-act="remove"]').addEventListener('click', () => removeChart(c));

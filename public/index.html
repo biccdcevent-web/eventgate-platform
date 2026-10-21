@@ -293,7 +293,7 @@
     $('privacyTitle').hidden = !c.title;
     $('privacyBody').innerHTML = EG.richText(c.body);
     $('consentLabel').textContent = c.checkbox;
-    $('submit').textContent = ev.form.submitLabel;
+    $('submit').textContent = submitLabel();
     form.querySelectorAll('fieldset[data-addr]').forEach(initAddress);
     form.querySelectorAll('[data-phone-ph]').forEach((input) => {
       input.addEventListener('input', () => {
@@ -384,8 +384,12 @@
     $('bWhen').textContent = d.date || '';
     $('strapText').textContent = Array(6).fill(d.name).join('  ');
     $('notice').hidden = true;
-    $('badgeCol').hidden = false;
-    $('wrap').classList.remove('single');
+    // The badge preview shows the name tag and QR pass; events without either get a single column.
+    const ck = ev.checkin || { enabled: true, qr: true, nameTags: true };
+    const showBadge = ck.qr || ck.nameTags;
+    $('badgeCol').hidden = !showBadge;
+    $('wrap').classList.toggle('single', !showBadge);
+    document.querySelector('#card .pass').hidden = !ck.qr;
     if (!issued) renderForm();
 
     const closed = ev.status === 'closed' || ev.status === 'archived' || ev.full;
@@ -397,6 +401,7 @@
     else if (PREVIEW) showNotice('Preview', 'This is how the registration page will look. Registrations made here are not saved.');
     if (closed) { $('badgeCol').hidden = true; $('wrap').classList.add('single'); }
   }
+  const submitLabel = () => (ev.checkin && !ev.checkin.qr && ev.form.submitLabel === 'Register and email my pass' ? 'Register' : ev.form.submitLabel);
 
   function notFound() {
     document.title = 'Event not found';
@@ -533,7 +538,7 @@
       formMessage('Registration failed because the server could not be reached. Check your connection and try again.');
     } finally {
       btn.disabled = false;
-      btn.textContent = ev.form.submitLabel;
+      btn.textContent = submitLabel();
     }
   });
 
@@ -549,6 +554,19 @@
   function issuePass(p) {
     issued = true;
     const card = $('card');
+    $('done').hidden = false;
+    form.hidden = true;
+    $('doneTitle').textContent = ev.form.successTitle;
+    if (!p.qr) {
+      // No QR pass for this event: just confirm.
+      $('download').hidden = true;
+      const ck = ev.checkin || {};
+      $('doneMsg').textContent = p.emailSent ? `We've emailed a confirmation to ${p.email}.` : `Your registration is saved. We couldn't send the confirmation email to ${p.email}.`;
+      $('doneHint').textContent = ck.enabled ? 'When you arrive, just give your name at the registration desk.' : '';
+      $('doneTitle').focus();
+      return;
+    }
+    $('download').hidden = false;
     flip(card, () => {
       card.classList.add('issued');
       const img = new Image();
@@ -561,7 +579,6 @@
     const dl = $('download');
     dl.href = p.qr;
     dl.download = `event-pass-${p.passCode}.png`;
-    $('doneTitle').textContent = ev.form.successTitle;
     if (p.emailSent) {
       $('doneMsg').textContent = `We've emailed your QR pass to ${p.email}. Show it at the registration desk when you arrive.`;
       $('doneHint').textContent = "If it hasn't arrived within a few minutes, check your spam folder, or download the pass below.";

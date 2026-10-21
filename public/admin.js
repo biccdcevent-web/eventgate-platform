@@ -226,12 +226,12 @@
           <a class="url" href="/${esc(e.slug)}" target="_blank" rel="noopener">${esc(location.host)}/${esc(e.slug)}</a>
           <div class="counts">
             <div><b class="num">${nf.format(e.registered)}</b><span>registered${e.capacity ? ` of ${nf.format(e.capacity)}` : ''}</span></div>
-            <div><b class="num">${nf.format(e.checkedIn)}</b><span>checked in</span></div>
+            ${e.checkin ? `<div><b class="num">${nf.format(e.checkedIn)}</b><span>checked in</span></div>` : ''}
           </div>
         </div>
         <div class="foot">
           <a class="btn btn-primary btn-sm" href="#/e/${e.id}">Dashboard</a>
-          ${isOwner() ? `<a class="btn btn-quiet btn-sm" href="#/e/${e.id}/settings">Settings</a><a class="btn btn-quiet btn-sm" href="/${esc(e.slug)}/checkin" target="_blank" rel="noopener">Check-in page</a>` : ''}
+          ${isOwner() ? `<a class="btn btn-quiet btn-sm" href="#/e/${e.id}/settings">Settings</a>${e.checkin ? `<a class="btn btn-quiet btn-sm" href="/${esc(e.slug)}/checkin" target="_blank" rel="noopener">Check-in page</a>` : ''}` : ''}
         </div>
       </article>`).join('')
       : `<p class="empty" style="grid-column:1/-1">${evFilter === 'archived' ? 'No archived events.' : isOwner() ? 'No events yet. Use “New event” to create your first one.' : 'No events have been shared with you yet.'}</p>`;
@@ -389,7 +389,7 @@
     $('evStatus').className = `chip ${cur.status}`;
     document.title = `${cur.config.details.name} · Event admin`;
     $('evLinks').innerHTML = `<a href="/${esc(cur.slug)}" target="_blank" rel="noopener">Registration page ↗</a>` +
-      (isOwner() ? `<a href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">Check-in page ↗</a>` : '');
+      (isOwner() && checkinOn() ? `<a href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">Check-in page ↗</a>` : '');
     $('backLink').hidden = !isOwner() && events.length <= 1;
     document.querySelectorAll('#evTabs a').forEach((a) => {
       a.href = `#/e/${cur.id}${a.dataset.tab === 'dash' ? '' : `/${a.dataset.tab}`}`;
@@ -463,15 +463,36 @@
   setInterval(() => { if (stats && tab === 'dash') renderFeed(false); }, 30000);
 
   // ---- dashboard
+  const checkinOn = () => !cur.config.checkin || cur.config.checkin.enabled;
   function render() {
     const t = stats.totals;
+    const ckOn = checkinOn();
+    // Events without check-in show registrations only.
+    $('heroLabel').textContent = ckOn ? 'Checked in' : 'Registered';
+    $('meter').hidden = !ckOn && !stats.event.capacity;
+    document.querySelectorAll('[data-ck-only]').forEach((el) => { el.hidden = !ckOn; });
+    if (!ckOn) {
+      $('hIn').textContent = nf.format(t.registered);
+      const today = (stats.registrationsByDay.find((d) => d.day === stats.today) || {}).count || 0;
+      document.querySelector('.hero .of').innerHTML = `<b class="num">${nf.format(today)}</b> registered today`;
+      if (stats.event.capacity) {
+        const full = Math.min(100, Math.round((t.registered / stats.event.capacity) * 100));
+        document.querySelector('.hero .of').innerHTML = `of <b class="num">${nf.format(stats.event.capacity)}</b> places, <b class="num">${full}%</b> full · <b class="num">${nf.format(today)}</b> today`;
+        $('meterFill').style.width = `${full}%`;
+        $('meter').setAttribute('aria-label', `${full}% of places taken`);
+      }
+    } else if (!document.getElementById('hReg')) {
+      document.querySelector('.hero .of').innerHTML = 'of <b class="num" id="hReg">0</b> registered, <b class="num" id="hPct">0%</b> attendance';
+    }
     $('updated').textContent = `· updated ${timeOf(stats.updatedAt)}`;
     const pct = t.registered ? Math.round((t.checkedIn / t.registered) * 100) : 0;
+    if (ckOn) {
     $('hIn').textContent = nf.format(t.checkedIn);
     $('hReg').textContent = nf.format(t.registered);
     $('hPct').textContent = `${pct}%`;
     $('meterFill').style.width = `${pct}%`;
     $('meter').setAttribute('aria-label', `${pct}% of registered attendees have checked in`);
+    }
     $('tReg').textContent = nf.format(t.registered);
     const todayCount = (stats.registrationsByDay.find((d) => d.day === stats.today) || {}).count || 0;
     $('tRegNote').textContent = stats.event.capacity ? `${nf.format(todayCount)} today · capacity ${nf.format(stats.event.capacity)}` : `${nf.format(todayCount)} today`;
@@ -480,7 +501,7 @@
     $('tCo').textContent = nf.format(t.companies || 0);
     $('tMail').textContent = nf.format(t.emailsPending);
     $('emailTile').classList.toggle('warn', t.emailsPending > 0);
-    $('tMailNote').innerHTML = t.emailsPending > 0 ? `${ICON.warn}<span>Check email settings; these attendees can download their pass</span>` : '<span>All passes were emailed</span>';
+    $('tMailNote').innerHTML = t.emailsPending > 0 ? `${ICON.warn}<span>Check the email settings on the server</span>` : '<span>All emails were sent</span>';
 
     const reg = stats.registrationsByDay;
     $('regSub').textContent = reg.length ? `New sign-ups each day, ${dayLabel(reg[0].day)} to ${dayLabel(reg[reg.length - 1].day)}` : 'New sign-ups each day';
@@ -503,6 +524,8 @@
     $('coCard').hidden = !top;
     $('arrCard').classList.toggle('span-7', Boolean(top));
     $('arrCard').classList.toggle('span-12', !top);
+    $('coCard').classList.toggle('span-5', ckOn);
+    $('coCard').classList.toggle('span-12', !ckOn);
     if (top) {
       const max = Math.max(1, ...top.map((c) => c.registered));
       $('companies').innerHTML = top.length ? top.map((c) => `
@@ -591,7 +614,10 @@
     const b = cur.config.badge;
     const f2 = b.line2 && fieldOf(b.line2), f3 = b.line3 && fieldOf(b.line3);
     const phone = fieldOf('contact_number');
-    $('peopleHead').innerHTML = `<tr><th scope="col">Name</th><th scope="col">${esc(f3 ? f3.label : 'Pass')}</th><th scope="col">Contact</th><th scope="col">Registered</th><th scope="col">Status</th></tr>`;
+    const ckOn = checkinOn();
+    $('peopleHead').innerHTML = `<tr><th scope="col">Name</th><th scope="col">${esc(f3 ? f3.label : 'Pass')}</th><th scope="col">Contact</th><th scope="col">Registered</th>${ckOn ? '<th scope="col">Status</th>' : ''}</tr>`;
+    $('peopleSeg').hidden = !ckOn;
+    if (!ckOn) filter = 'all';
     const term = $('q').value.trim().toLowerCase();
     const list = people.filter((p) =>
       (filter === 'all' || (filter === 'in' ? p.checkedInAt : !p.checkedInAt)) &&
@@ -602,7 +628,7 @@
       <td>${f3 ? esc(p.values[f3.key] || '') : ''}<span class="small num">Pass ${esc(p.passCode)}</span></td>
       <td>${phone && phone.enabled ? `<span class="num">${esc(p.contact)}</span>` : ''}<span class="small">${esc(p.email)}</span></td>
       <td class="num">${esc(dateTimeOf(p.registeredAt))}${p.emailSent ? '' : '<span class="small" style="color:var(--warn)">Pass email not sent</span>'}</td>
-      <td>${p.checkedInAt ? `<span class="badge in">${ICON.check}Checked in ${esc(timeOf(p.checkedInAt))}</span>` : '<span class="badge out">Not arrived</span>'}</td>
+      ${ckOn ? `<td>${p.checkedInAt ? `<span class="badge in">${ICON.check}Checked in ${esc(timeOf(p.checkedInAt))}</span>` : '<span class="badge out">Not arrived</span>'}</td>` : ''}
     </tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px">${people.length ? 'No attendees match this search.' : 'No registrations yet.'}</td></tr>`;
     $('showing').textContent = `Showing ${nf.format(shown.length)} of ${nf.format(list.length)}`;
     $('moreBtn').hidden = list.length <= limit;
@@ -616,7 +642,7 @@
       ['Pass code', p.passCode],
       ['Registered', dateTimeOf(p.registeredAt)],
       ['Pass emailed', p.emailSent ? 'Yes' : 'Not yet'],
-      ['Checked in', p.checkedInAt ? dateTimeOf(p.checkedInAt) : 'Not arrived'],
+      ...(checkinOn() ? [['Checked in', p.checkedInAt ? dateTimeOf(p.checkedInAt) : 'Not arrived']] : []),
     ];
     openDialog({ title: `${p.firstName} ${p.lastName}`, wide: true, body: `<dl class="answers">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` });
   }

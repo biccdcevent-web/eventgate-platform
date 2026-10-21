@@ -506,10 +506,10 @@
           <div class="meter" role="img" id="meter" aria-label="0% of registered attendees have checked in"><span id="meterFill" style="width:0%"></span></div>
         </section>
         <div class="tiles span-7">
-          <section class="tile"><span class="label">Registered</span><span class="value num" id="tReg">0</span><span class="note" id="tRegNote">&nbsp;</span></section>
-          <section class="tile"><span class="label">Not yet arrived</span><span class="value num" id="tOut">0</span><span class="note">Registered but not checked in</span></section>
+          <section class="tile" data-ck-only><span class="label">Registered</span><span class="value num" id="tReg">0</span><span class="note" id="tRegNote">&nbsp;</span></section>
+          <section class="tile" data-ck-only><span class="label">Not yet arrived</span><span class="value num" id="tOut">0</span><span class="note">Registered but not checked in</span></section>
           <section class="tile" id="coTile"><span class="label">Companies</span><span class="value num" id="tCo">0</span><span class="note">Different companies registered</span></section>
-          <section class="tile" id="emailTile"><span class="label">Pass emails not delivered</span><span class="value num" id="tMail">0</span><span class="note" id="tMailNote">All passes were emailed</span></section>
+          <section class="tile" id="emailTile"><span class="label">Emails not delivered</span><span class="value num" id="tMail">0</span><span class="note" id="tMailNote">All emails were sent</span></section>
         </div>
         <section class="card span-7" aria-labelledby="regTitle">
           <h2 id="regTitle">Registrations per day</h2>
@@ -522,7 +522,7 @@
           <p class="sub">Updates the moment someone registers or checks in</p>
           <ul class="feed" id="feed" aria-live="polite"></ul>
         </section>
-        <section class="card span-7" id="arrCard" aria-labelledby="arrTitle">
+        <section class="card span-7" id="arrCard" data-ck-only aria-labelledby="arrTitle">
           <h2 id="arrTitle">Arrivals on event day</h2>
           <p class="sub" id="arrSub">Check-ins every 15 minutes</p>
           <div class="chart" id="arrChart"></div>

@@ -54,7 +54,7 @@
   }
 
   // ------------------------------------------------------------ layout
-  const SECTIONS = [['details', 'Details'], ['branding', 'Branding'], ['form', 'Registration form'], ['email', 'Email'], ['tag', 'Name tag']];
+  const SECTIONS = [['details', 'Details'], ['branding', 'Branding'], ['form', 'Registration form'], ['email', 'Email'], ['checkin', 'Check-in'], ['tag', 'Name tag']];
   function build() {
     root.innerHTML = `
       <div class="settings">
@@ -85,14 +85,21 @@
     root.querySelectorAll('[data-sec]').forEach((b) => b.addEventListener('click', () => showSection(b.dataset.sec)));
     root.querySelectorAll('[data-pv]').forEach((b) => b.addEventListener('click', () => showPreview(b.dataset.pv)));
     root.querySelectorAll('[data-dev]').forEach((b) => b.addEventListener('click', () => { device = b.dataset.dev; sizeFrame(); syncPvButtons(); }));
-    $('discard').addEventListener('click', () => { draft = JSON.parse(saved); openKey = null; renderSection(); changed(); });
+    $('discard').addEventListener('click', () => { draft = JSON.parse(saved); openKey = null; syncOptions(); if (section === 'tag' && !draft.config.checkin.nameTags) section = 'checkin'; renderSection(); changed(); });
     $('saveBtn').addEventListener('click', save);
     $('pageFrame').src = `/${encodeURIComponent(ev.slug)}?preview=1`;
     $('pageFrame').addEventListener('load', () => { sizeFrame(); postPage(); });
     showSection(section);
   }
+  // The Name tag section and preview only apply when the event prints name tags.
+  function syncOptions() {
+    const tags = draft.config.checkin.nameTags;
+    root.querySelectorAll('[data-sec="tag"], [data-pv="tag"]').forEach((b) => { b.hidden = !tags; });
+  }
   function showSection(k) {
+    if (k === 'tag' && !draft.config.checkin.nameTags) k = 'checkin';
     section = k;
+    syncOptions();
     root.querySelectorAll('[data-sec]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sec === k)));
     renderSection();
     showPreview(k === 'email' ? 'email' : k === 'tag' ? 'tag' : 'page');
@@ -122,6 +129,7 @@
       branding: c.branding,
       form: { fields: c.form.fields.filter((f) => f.enabled), consent: c.form.consent, submitLabel: c.form.submitLabel, successTitle: c.form.successTitle, closedMessage: c.form.closedMessage },
       badge: c.badge,
+      checkin: c.checkin,
     };
   }
   function postPage() {
@@ -251,10 +259,28 @@
           ${text('config.details.capacity', 'Capacity (optional)', { type: 'number', help: 'Registration closes automatically at this number. Leave blank for no limit.', max: 6 })}
         </div>
       </section>
+`,
+
+    checkin: () => {
+      const c = draft.config.checkin;
+      const opt = (key, title, help, disabled) => `<label class="check" style="align-items:flex-start${disabled ? ';opacity:.55' : ''}"><input type="checkbox" data-ck="${key}"${c[key] ? ' checked' : ''}${disabled ? ' disabled' : ''}>
+        <span><b style="display:block;font-weight:600">${title}</b><span style="color:var(--muted);font-size:.86rem">${help}</span></span></label>`;
+      const summary = !c.enabled
+        ? 'Registration only. Attendees get a confirmation email without a QR code, and the dashboard shows registrations only.'
+        : `${c.qr ? 'Attendees get a QR pass by email, and staff scan it at the desk' : 'Attendees get a confirmation email, and staff find them by name at the desk'}${c.nameTags ? ', then a name tag prints.' : '. No name tags are printed.'}`;
+      return `
       <section class="card stack">
+        <h3>What happens at the venue</h3>
+        ${opt('enabled', 'Check attendees in at the venue', 'Staff record arrivals on the check-in page. Turn this off for events that only need a list of registrations.', false)}
+        ${opt('qr', 'Send each registrant a QR pass', 'The QR code is scanned at the desk. Without it, staff look attendees up by name, and the email is a simple confirmation.', !c.enabled)}
+        ${opt('nameTags', 'Print a name tag at check-in', 'Prints on a label printer as each attendee checks in. Set up the tag in the Name tag section.', !c.enabled)}
+        <p class="notice info" style="margin:4px 0 0">${esc(summary)}</p>
+      </section>
+      ${c.enabled ? `<section class="card stack">
         <div class="field"><label for="s_pin">Staff check-in PIN</label><div class="pw-row"><input id="s_pin" type="text" data-path="staffPin" value="${esc(draft.staffPin)}" maxlength="12" inputmode="numeric"><button class="btn btn-quiet" type="button" id="pinGen">New PIN</button></div>
           <p class="help">4 to 12 digits. Staff enter it on <a href="/${esc(ev.slug)}/checkin" target="_blank" rel="noopener">${esc(location.host)}/${esc(ev.slug)}/checkin</a>. Each event has its own PIN.</p></div>
-      </section>`,
+      </section>` : ''}`;
+    },
 
     branding: () => {
       const b = draft.config.branding;
@@ -315,6 +341,7 @@
       const chips = [...EG.PLACEHOLDERS, ...c.form.fields.filter((f) => f.enabled && !EG.PLACEHOLDERS.includes(f.key)).map((f) => f.key)];
       const summaryOpts = c.form.fields.filter((f) => f.enabled && !['first_name', 'last_name'].includes(f.key));
       return `
+      ${EG.emailMode(c) !== 'qr' ? `<p class="notice info" style="margin:0">${EG.emailMode(c) === 'name' ? 'This event doesn’t use QR passes, so the email is a confirmation and attendees give their name at the desk.' : 'This event doesn’t use check-in, so the email is a simple confirmation without a QR code.'} You can change this in the Check-in section.</p>` : ''}
       <section class="card stack">
         <div class="two">
           ${text('config.email.fromName', 'Sender name', { placeholder: c.details.name, max: 80, help: `Emails come from ${esc(platform.senderAddress || 'your MAIL_FROM address')}.` })}
@@ -398,7 +425,29 @@
     details(body) {
       body.querySelectorAll('input[name="s_status"]').forEach((r) => r.addEventListener('change', () => { draft.status = r.value; changed(); }));
       $('s_slug').addEventListener('input', (e) => { const s = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'); if (s !== e.target.value) e.target.value = s; draft.slug = s; changed(); });
-      $('pinGen').addEventListener('click', () => { const pin = String(100000 + Math.floor(Math.random() * 900000)); $('s_pin').value = pin; draft.staffPin = pin; changed(); });
+
+    },
+    checkin(body) {
+      if ($('pinGen')) $('pinGen').addEventListener('click', () => { const pin = String(100000 + Math.floor(Math.random() * 900000)); $('s_pin').value = pin; draft.staffPin = pin; changed(); });
+      body.querySelectorAll('[data-ck]').forEach((el) => el.addEventListener('change', () => {
+        const c = draft.config.checkin;
+        const before = EG.emailMode(draft.config);
+        c[el.dataset.ck] = el.checked;
+        if (el.dataset.ck === 'enabled') { c.qr = el.checked; c.nameTags = el.checked; }
+        // Standard email wording and button text follow the change; wording you wrote yourself is kept.
+        const after = EG.emailMode(draft.config);
+        if (before !== after) {
+          const em = draft.config.email;
+          const isStandard = (k) => Object.values(EG.EMAIL_TEXT).some((m) => m[k] && em[k] === m[k]) || (!em[k] && k === 'footer');
+          for (const k of ['subject', 'body', 'footer']) if (isStandard(k)) em[k] = EG.EMAIL_TEXT[after][k];
+          const f = draft.config.form;
+          if (after !== 'qr' && f.submitLabel === 'Register and email my pass') f.submitLabel = 'Register';
+          if (after === 'qr' && f.submitLabel === 'Register') f.submitLabel = 'Register and email my pass';
+        }
+        syncOptions();
+        renderSection();
+        changed();
+      }));
     },
     branding(body) {
       for (const key of ['primary', 'secondary', 'background']) {
