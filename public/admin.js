@@ -219,7 +219,7 @@
       <article class="ev-card" style="--ev:${esc(e.primary)}">
         <div class="body">
           <div class="top">
-            <div><h2>${esc(e.name)}</h2><div class="meta">${esc([e.date, e.venue].filter(Boolean).join(' · ') || 'No date set yet')}</div></div>
+            <div><h2>${esc(e.name)}</h2><div class="meta">${e.date || e.venue ? [e.date, e.venue].filter(Boolean).map((x) => `<span style="display:block">${esc(x)}</span>`).join('') : 'No date set yet'}</div></div>
             ${e.logo ? `<img class="logo" src="${esc(e.logo)}" alt="">` : ''}
           </div>
           <div class="chips"><span class="chip ${e.status}">${STATUS_LABEL[e.status]}</span>${e.isHome ? '<span class="chip home">Main address</span>' : ''}</div>
@@ -396,7 +396,7 @@
       if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     $('csvBtn').hidden = !me.canExport;
-    $('csvBtn').href = `/api/admin/events/${cur.id}/registrations.csv`;
+    $('csvBtn').href = `/api/admin/events/${cur.id}/report.xlsx`;
     $('archTitle').textContent = cur.status === 'archived' ? 'Restore from archive' : 'Archive event';
     $('archText').textContent = cur.status === 'archived'
       ? 'Moves the event back to the Active list with registration closed. You can reopen registration in Settings.'
