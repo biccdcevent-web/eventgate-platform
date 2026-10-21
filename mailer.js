@@ -88,13 +88,31 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
   const hfont = `font-family:${EG.fontStack(b.headingFont).replace(/"/g, "'")};`;
   const logoPath = b.logoInEmail && b.logo ? path.join(uploadsDir, path.basename(b.logo)) : null;
   const hasLogo = Boolean(logoPath && fs.existsSync(logoPath));
-  const [logoW, logoH] = (EG.LOGO_SIZES[b.logoSize] || EG.LOGO_SIZES.medium).email;
+  const [logoW, logoH] = (EG.LOGO_SIZES[b.emailLogoSize] || EG.LOGO_SIZES.medium).email;
   const logo = hasLogo ? fitBox(imageSize(logoPath), logoW, logoH) : null;
-  const logoAlign = EG.LOGO_ALIGNS.includes(b.logoAlign) ? b.logoAlign : 'left';
+  const logoAlign = EG.LOGO_ALIGNS.includes(b.emailLogoAlign) ? b.emailLogoAlign : 'left';
   const logoMargin = { left: '0', center: '0 auto', right: '0 0 0 auto' }[logoAlign];
+  const logoPlace = EG.LOGO_PLACES.includes(b.emailLogoPlace) ? b.emailLogoPlace : 'above';
   const fields = new Map(c.form.fields.map((f) => [f.key, f]));
   const bg = b.background;
   const ink = '#141414', muted = '#5C5C5C';
+
+  // Event name, date and venue, with the logo above them or beside them.
+  const logoImg = logo ? `<img src="cid:eventlogo" width="${logo.w}" height="${logo.h}" alt="${esc(c.details.organizer || c.details.name)}" style="display:block;width:${logo.w}px;height:${logo.h}px;max-width:100%;border:0;outline:none;margin:${logoPlace === 'above' ? logoMargin : '0'}">` : '';
+  const titleBlock = `<h1 style="${hfont}margin:0;font-size:24px;line-height:31px;font-weight:bold;color:${ink}">${esc(c.details.name)}</h1>
+    ${c.details.date ? `<p style="${font}margin:8px 0 0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.date)}</p>` : ''}
+    ${c.details.venue ? `<p style="${font}margin:0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.venue)}</p>` : ''}`;
+  let header;
+  if (logo && logoPlace !== 'above') {
+    const logoCell = `<td class="eg-side eg-side-logo" width="${logo.w}" valign="middle" style="width:${logo.w}px;padding:0 ${logoPlace === 'left' ? 20 : 0}px 0 ${logoPlace === 'right' ? 20 : 0}px">${logoImg}</td>`;
+    const textCell = `<td class="eg-side" dir="ltr" valign="middle" style="text-align:left">${titleBlock}</td>`;
+    // On phones the two cells stack, logo first. For "right of the name" the table runs right-to-left,
+    // so the logo cell still comes first in the code (and on top when stacked) but shows on the right.
+    header = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${logoPlace === 'right' ? ' dir="rtl"' : ''}><tr>${logoCell}${textCell}</tr></table>`;
+  } else {
+    header = `${logo ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${logoAlign}" style="padding:0 0 20px">${logoImg}</td></tr></table>` : ''}
+    ${titleBlock}`;
+  }
 
   const row = (label, value) =>
     `<tr><td width="150" valign="top" style="${font}padding:9px 16px 9px 0;color:${muted};font-size:14px;line-height:20px;width:150px;border-bottom:1px solid #EEEEEE">${esc(label)}</td>` +
@@ -130,6 +148,8 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
 <style>body,table,td,p,div,span,a,li{font-family:Arial,Helvetica,sans-serif !important;}</style><![endif]-->
 <style>
   @media screen and (max-width: 640px) {
+    .eg-side { display: block !important; width: 100% !important; padding: 0 !important; }
+    .eg-side-logo { padding: 16px 0 !important; }
     .eg-card { width: 100% !important; }
     .eg-pad { padding-left: 22px !important; padding-right: 22px !important; }
     .eg-outer { padding: 16px 8px !important; }
@@ -148,10 +168,7 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
 <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td><![endif]-->
 <table role="presentation" class="eg-card" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:600px;max-width:600px;background:#ffffff;border-top:6px solid ${b.primary}">
   <tr><td class="eg-pad" style="padding:32px 40px 8px;text-align:left">
-    ${logo ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${logoAlign}" style="padding:0 0 20px"><img src="cid:eventlogo" width="${logo.w}" height="${logo.h}" alt="${esc(c.details.organizer || c.details.name)}" style="display:block;width:${logo.w}px;height:${logo.h}px;max-width:100%;border:0;outline:none;margin:${logoMargin}"></td></tr></table>` : ''}
-    <h1 style="${hfont}margin:0;font-size:24px;line-height:31px;font-weight:bold;color:${ink}">${esc(c.details.name)}</h1>
-    ${c.details.date ? `<p style="${font}margin:8px 0 0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.date)}</p>` : ''}
-    ${c.details.venue ? `<p style="${font}margin:0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.venue)}</p>` : ''}
+    ${header}
   </td></tr>
   <tr><td class="eg-pad" style="padding:24px 40px 8px;text-align:left">
     ${body}
