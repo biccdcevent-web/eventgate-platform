@@ -163,6 +163,7 @@ function publicEvent(ev) {
       closedMessage: c.form.closedMessage,
     },
     badge: c.badge,
+    checkin: c.checkin,
   };
 }
 const isPublic = (ev) => ev && (ev.status === 'open' || ev.status === 'closed' || ev.status === 'archived');
@@ -239,7 +240,7 @@ async function handleRegister(req, res) {
     fullName: row.full_name,
     email: row.email,
     emailSent,
-    qr: `data:image/png;base64,${png.toString('base64')}`,
+    qr: c.checkin.qr ? `data:image/png;base64,${png.toString('base64')}` : null,
   });
 }
 
@@ -252,8 +253,22 @@ function badgeLines(ev, row) {
 function staffEvent(req, res) {
   const ev = eventForPublic(req);
   if (!ev || ev.status === 'archived') { notFound(res); return null; }
+  if (!ev.config.checkin.enabled) { res.status(403).json({ message: 'Check-in is turned off for this event.', disabled: true }); return null; }
   if (!secretMatches(req.get('x-staff-pin'), ev.staffPin)) { res.status(401).json({ message: 'That PIN is incorrect.' }); return null; }
   return ev;
+}
+// Staff look attendees up by name, email or company (used when the event has no QR pass, or someone lost theirs).
+const searchQ = db.prepare(`SELECT * FROM registrations WHERE event_id = @event
+  AND (full_name LIKE @q ESCAPE '\\' OR email LIKE @q ESCAPE '\\' OR company_name LIKE @q ESCAPE '\\' OR (first_name || ' ' || last_name) LIKE @q ESCAPE '\\')
+  ORDER BY (checked_in_at IS NOT NULL), full_name COLLATE NOCASE LIMIT 12`);
+function handleSearch(req, res) {
+  const ev = staffEvent(req, res);
+  if (!ev) return;
+  const term = String((req.body || {}).q || '').replace(/\s+/g, ' ').trim();
+  if (term.length < 2) return res.json({ results: [] });
+  const like = `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  const results = searchQ.all({ event: ev.id, q: like }).map((r) => ({ ...badgeLines(ev, r), email: r.email, checkedInAt: sqlTimeToIso(r.checked_in_at) }));
+  res.json({ results });
 }
 function handleVerify(req, res) {
   const ev = staffEvent(req, res);
@@ -279,6 +294,7 @@ app.get('/api/e/:slug', handleEvent);
 app.post('/api/e/:slug/register', registerLimiter, handleRegister);
 app.post('/api/e/:slug/staff/verify', staffPinLimiter, handleVerify);
 app.post('/api/e/:slug/checkin', checkinLimiter, staffPinLimiter, handleCheckin);
+app.post('/api/e/:slug/staff/search', checkinLimiter, staffPinLimiter, handleSearch);
 // Addresses used by the first version: they now mean "the event on the home page".
 app.get('/api/event', handleEvent);
 app.post('/api/register', registerLimiter, handleRegister);
@@ -505,7 +521,7 @@ function eventSummary(ev) {
     id: ev.id, slug: ev.slug, status: ev.status, name: ev.config.details.name, date: ev.config.details.date,
     venue: ev.config.details.venue, logo: ev.config.branding.logo, primary: ev.config.branding.primary,
     registered: c.total, checkedIn: c.checkedIn, capacity: ev.config.details.capacity,
-    isHome: getSetting('home_event') === ev.slug, createdAt: sqlTimeToIso(ev.createdAt),
+    isHome: getSetting('home_event') === ev.slug, createdAt: sqlTimeToIso(ev.createdAt), checkin: ev.config.checkin.enabled,
   };
 }
 
@@ -518,7 +534,7 @@ app.get('/api/admin/events/:id', requireSignedIn, withEvent, (req, res) => {
   const base = { ...eventSummary(ev, req.auth) };
   if (req.auth.role === 'owner') return res.json({ ...base, staffPin: ev.staffPin, config: ev.config });
   const c = ev.config;
-  res.json({ ...base, config: { details: { name: c.details.name, date: c.details.date, venue: c.details.venue, timezone: c.details.timezone }, form: { fields: c.form.fields }, badge: c.badge, branding: { primary: c.branding.primary } } });
+  res.json({ ...base, config: { details: { name: c.details.name, date: c.details.date, venue: c.details.venue, timezone: c.details.timezone }, form: { fields: c.form.fields }, badge: c.badge, checkin: c.checkin, branding: { primary: c.branding.primary } } });
 });
 
 function copyLogo(logo) {
@@ -710,7 +726,7 @@ function computeStats(ev) {
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6).map((a) => ({ ...a, at: sqlTimeToIso(a.at) }));
 
   return {
-    event: { id: ev.id, slug: ev.slug, status: ev.status, name: c.details.name, capacity: c.details.capacity },
+    event: { id: ev.id, slug: ev.slug, status: ev.status, name: c.details.name, capacity: c.details.capacity, checkin: c.checkin.enabled },
     timeZone: tz,
     today: F.day.format(new Date()),
     totals: {
@@ -762,13 +778,14 @@ function buildCsv(ev, rows) {
       }
     } else cols.push({ label: f.label, get: (v) => v[f.key], guard: !['phone_ph', 'phone'].includes(f.type) });
   }
-  const header = ['Pass code', ...cols.map((x) => x.label), `Registered (${c.details.timezone})`, 'Pass emailed', `Checked in (${c.details.timezone})`];
+  const withCheckin = c.checkin.enabled;
+  const header = ['Pass code', ...cols.map((x) => x.label), `Registered (${c.details.timezone})`, 'Confirmation emailed', ...(withCheckin ? [`Checked in (${c.details.timezone})`] : [])];
   const lines = [header.map((h) => cell(h)).join(',')];
   rows.forEach((r, i) => {
     lines.push([
       cell(pretty(r.pass_code)),
       ...cols.map((x) => cell(x.get(values[i]), x.guard)),
-      cell(local(r.created_at)), cell(r.email_sent_at ? 'Yes' : 'No'), cell(local(r.checked_in_at)),
+      cell(local(r.created_at)), cell(r.email_sent_at ? 'Yes' : 'No'), ...(withCheckin ? [cell(local(r.checked_in_at))] : []),
     ].join(','));
   });
   return '﻿' + lines.join('\r\n'); // BOM so Excel reads ñ and other accents correctly

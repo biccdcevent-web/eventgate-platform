@@ -55,6 +55,8 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
   const c = event.config;
   const b = c.branding;
   const vars = templateVars(event, values, passCode);
+  const em = EG.effectiveEmail(c);
+  const withQr = EG.emailMode(c) === 'qr';   // no QR code or pass code when the event doesn't use them
   const font = `font-family:${EG.fontStack(b.bodyFont).replace(/"/g, "'")};`;
   const hfont = `font-family:${EG.fontStack(b.headingFont).replace(/"/g, "'")};`;
   const logoPath = b.logoInEmail && b.logo ? path.join(uploadsDir, path.basename(b.logo)) : null;
@@ -65,14 +67,14 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
     `<tr><td style="${font}padding:6px 12px 6px 0;color:#5C5C5C;font-size:13px;width:120px;vertical-align:top">${esc(label)}</td>` +
     `<td style="${font}padding:6px 0;color:#141414;font-size:14px">${esc(value)}</td></tr>`;
   const summary = [row('Name', vars.full_name)];
-  for (const k of c.email.summaryFields) {
+  for (const k of em.summaryFields) {
     const f = fields.get(k);
     if (f && f.enabled && values[k] && !['first_name', 'last_name'].includes(k)) summary.push(row(f.label, values[k]));
   }
 
-  const subject = EG.fill(c.email.subject, vars).replace(/\s+/g, ' ').trim() || `Your pass for ${c.details.name}`;
-  const body = EG.richText(EG.fill(c.email.body, vars), { p: 'margin:0 0 14px', ul: 'margin:0 0 14px;padding-left:20px', li: 'margin:0 0 6px' });
-  const footer = EG.richText(EG.fill(c.email.footer, vars), { p: 'margin:0 0 8px', ul: 'margin:0 0 8px;padding-left:18px' });
+  const subject = EG.fill(em.subject, vars).replace(/\s+/g, ' ').trim() || `Your pass for ${c.details.name}`;
+  const body = EG.richText(EG.fill(em.body, vars), { p: 'margin:0 0 14px', ul: 'margin:0 0 14px;padding-left:20px', li: 'margin:0 0 6px' });
+  const footer = EG.richText(EG.fill(em.footer, vars), { p: 'margin:0 0 8px', ul: 'margin:0 0 8px;padding-left:18px' });
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
 <body style="margin:0;background:${b.background};padding:24px 12px">
@@ -85,10 +87,10 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
   </td></tr>
   <tr><td style="${font}padding:20px 30px 30px;color:#141414;font-size:15px;line-height:1.55">
     ${body}
-    <div style="text-align:center;margin:10px 0 8px">
+    ${withQr ? `<div style="text-align:center;margin:10px 0 8px">
       <img src="cid:passqr" width="240" height="240" alt="Your QR pass" style="display:inline-block;border:1px solid #D4D4D4;border-radius:10px">
     </div>
-    <div style="text-align:center;font-family:'Courier New',monospace;font-size:20px;font-weight:bold;letter-spacing:3px;margin:0 0 22px;color:#141414">${esc(passCode)}</div>
+    <div style="text-align:center;font-family:'Courier New',monospace;font-size:20px;font-weight:bold;letter-spacing:3px;margin:0 0 22px;color:#141414">${esc(passCode)}</div>` : ''}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E6E6E6;padding-top:8px">${summary.join('')}</table>
     ${footer ? `<div style="${font}margin:22px 0 0;color:#5C5C5C;font-size:13px;line-height:1.5">${footer}</div>` : ''}
   </td></tr>
@@ -102,31 +104,31 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
 
   const plain = (s) => String(s || '').replace(/\*\*(.+?)\*\*/g, '$1');
   const text = [
-    plain(EG.fill(c.email.body, vars)),
+    plain(EG.fill(em.body, vars)),
     '',
     `${c.details.name}`,
     c.details.date ? `When: ${c.details.date}` : null,
     c.details.venue ? `Where: ${c.details.venue}` : null,
     '',
-    `Your pass code: ${passCode}`,
-    'Your QR pass is attached. Show it at the registration desk when you arrive.',
-    '',
+    withQr ? `Your pass code: ${passCode}` : null,
+    withQr ? 'Your QR pass is attached. Show it at the registration desk when you arrive.' : null,
+    withQr ? '' : null,
     `Name: ${vars.full_name}`,
-    ...c.email.summaryFields.filter((k) => fields.get(k) && fields.get(k).enabled && values[k] && !['first_name', 'last_name'].includes(k)).map((k) => `${fields.get(k).label}: ${values[k]}`),
+    ...em.summaryFields.filter((k) => fields.get(k) && fields.get(k).enabled && values[k] && !['first_name', 'last_name'].includes(k)).map((k) => `${fields.get(k).label}: ${values[k]}`),
     '',
-    plain(EG.fill(c.email.footer, vars)) || null,
+    plain(EG.fill(em.footer, vars)) || null,
     '',
     'Powered by Jupiter Systems, Inc.',
   ].filter((l) => l !== null).join('\n');
 
-  return { subject, html, text, logoPath: hasLogo ? logoPath : null };
+  return { subject, html, text, logoPath: hasLogo ? logoPath : null, withQr };
 }
 
 async function sendPassEmail({ event, values, passCode, qrPng, uploadsDir, to }) {
   const msg = renderPassEmail({ event, values, passCode, uploadsDir });
   const c = event.config;
   const attachments = [
-    { filename: `pass-${passCode}.png`, content: qrPng, contentType: 'image/png', cid: 'passqr' },
+    ...(msg.withQr ? [{ filename: `pass-${passCode}.png`, content: qrPng, contentType: 'image/png', cid: 'passqr' }] : []),
     { filename: 'jupiter-systems.png', path: path.join(__dirname, 'jupiter-logo-email.png'), contentType: 'image/png', cid: 'jupiterlogo' },
   ];
   if (msg.logoPath) attachments.push({ filename: `logo${path.extname(msg.logoPath)}`, path: msg.logoPath, cid: 'eventlogo' });
