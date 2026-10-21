@@ -88,7 +88,10 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
   const hfont = `font-family:${EG.fontStack(b.headingFont).replace(/"/g, "'")};`;
   const logoPath = b.logoInEmail && b.logo ? path.join(uploadsDir, path.basename(b.logo)) : null;
   const hasLogo = Boolean(logoPath && fs.existsSync(logoPath));
-  const logo = hasLogo ? fitBox(imageSize(logoPath), 200, 56) : null;
+  const [logoW, logoH] = (EG.LOGO_SIZES[b.logoSize] || EG.LOGO_SIZES.medium).email;
+  const logo = hasLogo ? fitBox(imageSize(logoPath), logoW, logoH) : null;
+  const logoAlign = EG.LOGO_ALIGNS.includes(b.logoAlign) ? b.logoAlign : 'left';
+  const logoMargin = { left: '0', center: '0 auto', right: '0 0 0 auto' }[logoAlign];
   const fields = new Map(c.form.fields.map((f) => [f.key, f]));
   const bg = b.background;
   const ink = '#141414', muted = '#5C5C5C';
@@ -145,7 +148,7 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
 <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" align="center"><tr><td><![endif]-->
 <table role="presentation" class="eg-card" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:600px;max-width:600px;background:#ffffff;border-top:6px solid ${b.primary}">
   <tr><td class="eg-pad" style="padding:32px 40px 8px;text-align:left">
-    ${logo ? `<img src="cid:eventlogo" width="${logo.w}" height="${logo.h}" alt="${esc(c.details.organizer || c.details.name)}" style="display:block;width:${logo.w}px;height:${logo.h}px;max-width:100%;border:0;outline:none;margin:0 0 20px">` : ''}
+    ${logo ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${logoAlign}" style="padding:0 0 20px"><img src="cid:eventlogo" width="${logo.w}" height="${logo.h}" alt="${esc(c.details.organizer || c.details.name)}" style="display:block;width:${logo.w}px;height:${logo.h}px;max-width:100%;border:0;outline:none;margin:${logoMargin}"></td></tr></table>` : ''}
     <h1 style="${hfont}margin:0;font-size:24px;line-height:31px;font-weight:bold;color:${ink}">${esc(c.details.name)}</h1>
     ${c.details.date ? `<p style="${font}margin:8px 0 0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.date)}</p>` : ''}
     ${c.details.venue ? `<p style="${font}margin:0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.venue)}</p>` : ''}

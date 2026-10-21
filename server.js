@@ -30,6 +30,8 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const q = {
   byCode: db.prepare('SELECT * FROM registrations WHERE pass_code = ?'),
   byEmail: db.prepare('SELECT * FROM registrations WHERE event_id = ? AND email = ?'),
+  // Without an email, the same name with the same contact number counts as already registered.
+  byNameContact: db.prepare(`SELECT * FROM registrations WHERE event_id = ? AND full_name = ? COLLATE NOCASE AND IFNULL(contact_number, '') = ? LIMIT 1`),
   insert: db.prepare(`INSERT INTO registrations
       (event_id, pass_code, first_name, last_name, full_name, email, designation, company_name, company_address, contact_number, extra)
       VALUES (@event_id, @pass_code, @first_name, @last_name, @full_name, @email, @designation, @company_name, @company_address, @contact_number, @extra)`),
@@ -111,10 +113,15 @@ function rowValues(r) {
   return v;
 }
 
+// Whether this registration gets an email: the event sends them, and the registrant gave an address.
+const mailsTo = (ev, row) => Boolean(row.email) && ev.config.email.send !== false;
+
 async function sendPass(ev, row, png) {
+  if (!mailsTo(ev, row)) return false;
   png = png || (await qrPng(tokenFor(row.pass_code)));
   await sendPassEmail({ event: ev, values: rowValues(row), passCode: pretty(row.pass_code), qrPng: png, uploadsDir });
   q.markSent.run(row.id);
+  return true;
 }
 
 function secretMatches(given, expected) {
@@ -196,12 +203,15 @@ async function handleRegister(req, res) {
   }
   if (Object.keys(errors).length) return res.status(422).json({ errors });
 
+  const fullName = `${values.first_name} ${values.last_name}`.trim();
   const alreadyRegistered = (row) => {
+    if (!values.email || !row.email) return res.status(409).json({ message: `${row.full_name} is already registered.` });
     // Never return the existing QR here: anyone could type someone else's email.
+    if (!mailsTo(ev, row)) return res.status(409).json({ message: `${row.email} is already registered.` });
     sendPass(ev, row).catch((err) => console.error(`[mail] Resend to ${row.email} failed:`, err.message));
-    return res.status(409).json({ message: `${row.email} is already registered. We're sending that pass to the same address again.` });
+    return res.status(409).json({ message: `${row.email} is already registered. We're sending ${c.checkin.qr ? 'that pass' : 'the confirmation'} to the same address again.` });
   };
-  const existing = q.byEmail.get(ev.id, values.email);
+  const existing = values.email ? q.byEmail.get(ev.id, values.email) : q.byNameContact.get(ev.id, fullName, values.contact_number || '');
   if (existing) return alreadyRegistered(existing);
   if (c.details.capacity && q.counts.get(ev.id).total >= c.details.capacity) {
     return res.status(403).json({ message: 'Sorry, this event is full.', closed: true });
@@ -211,8 +221,8 @@ async function handleRegister(req, res) {
   for (const [k, v] of Object.entries(values)) if (!EG.BUILTIN.includes(k)) extra[k] = v;
   const rec = {
     event_id: ev.id,
-    first_name: values.first_name, last_name: values.last_name, full_name: `${values.first_name} ${values.last_name}`.trim(),
-    email: values.email,
+    first_name: values.first_name, last_name: values.last_name, full_name: fullName,
+    email: values.email || null,
     designation: values.designation || null, company_name: values.company_name || null,
     company_address: values.company_address || null, contact_number: values.contact_number || null,
     extra: JSON.stringify(extra),
@@ -233,12 +243,14 @@ async function handleRegister(req, res) {
 
   const png = await qrPng(tokenFor(row.pass_code));
   let emailSent = false;
-  try { await sendPass(ev, row, png); emailSent = true; } catch (err) { console.error(`[mail] Sending to ${row.email} failed:`, err.message); }
+  const emailing = mailsTo(ev, row);
+  try { emailSent = await sendPass(ev, row, png); } catch (err) { console.error(`[mail] Sending to ${row.email} failed:`, err.message); }
 
   res.status(201).json({
     passCode: pretty(row.pass_code),
     fullName: row.full_name,
-    email: row.email,
+    email: row.email || '',
+    emailing,
     emailSent,
     qr: c.checkin.qr ? `data:image/png;base64,${png.toString('base64')}` : null,
   });
@@ -731,7 +743,8 @@ function computeStats(ev) {
     today: F.day.format(new Date()),
     totals: {
       registered: rows.length, checkedIn: arrived.length, notArrived: rows.length - arrived.length,
-      companies: hasCompany ? companies.size : null, emailsPending: rows.filter((r) => !r.email_sent_at).length,
+      companies: hasCompany ? companies.size : null, emailsPending: c.email.send === false ? 0 : rows.filter((r) => r.email && !r.email_sent_at).length,
+      emailsOff: c.email.send === false,
     },
     registrationsByDay,
     arrivals,
@@ -779,13 +792,14 @@ function buildCsv(ev, rows) {
     } else cols.push({ label: f.label, get: (v) => v[f.key], guard: !['phone_ph', 'phone'].includes(f.type) });
   }
   const withCheckin = c.checkin.enabled;
-  const header = ['Pass code', ...cols.map((x) => x.label), `Registered (${c.details.timezone})`, 'Confirmation emailed', ...(withCheckin ? [`Checked in (${c.details.timezone})`] : [])];
+  const withMail = c.email.send !== false;
+  const header = ['Pass code', ...cols.map((x) => x.label), `Registered (${c.details.timezone})`, ...(withMail ? ['Confirmation emailed'] : []), ...(withCheckin ? [`Checked in (${c.details.timezone})`] : [])];
   const lines = [header.map((h) => cell(h)).join(',')];
   rows.forEach((r, i) => {
     lines.push([
       cell(pretty(r.pass_code)),
       ...cols.map((x) => cell(x.get(values[i]), x.guard)),
-      cell(local(r.created_at)), cell(r.email_sent_at ? 'Yes' : 'No'), ...(withCheckin ? [cell(local(r.checked_in_at))] : []),
+      cell(local(r.created_at)), ...(withMail ? [cell(r.email_sent_at ? 'Yes' : r.email ? 'No' : 'No email given')] : []), ...(withCheckin ? [cell(local(r.checked_in_at))] : []),
     ].join(','));
   });
   return '﻿' + lines.join('\r\n'); // BOM so Excel reads ñ and other accents correctly

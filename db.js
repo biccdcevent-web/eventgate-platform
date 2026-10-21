@@ -14,7 +14,7 @@ const REG_COLUMNS = `
     first_name      TEXT,
     last_name       TEXT,
     full_name       TEXT NOT NULL,
-    email           TEXT NOT NULL COLLATE NOCASE,
+    email           TEXT COLLATE NOCASE,
     designation     TEXT,
     company_name    TEXT,
     company_address TEXT,
@@ -164,6 +164,23 @@ function openDb(dbPath, env = process.env) {
     }
   });
   migrate();
+
+  // Added later: email can be left blank when an event sends no QR pass. Older databases had it required,
+  // so the table is rebuilt once (after saving a copy). Blank emails are stored as NULL, which UNIQUE allows many of.
+  const emailCol = db.prepare('PRAGMA table_info(registrations)').all().find((c) => c.name === 'email');
+  if (emailCol && emailCol.notnull) {
+    const copy = path.join(backupDir, `pre-upgrade-${stamp()}.db`);
+    db.prepare('VACUUM INTO ?').run(copy);
+    console.log(`[upgrade] Saved a copy of the database before upgrading: ${copy}`);
+    const all = db.prepare('PRAGMA table_info(registrations)').all().map((c) => c.name);
+    db.transaction(() => {
+      db.exec(`CREATE TABLE registrations_new (${REG_COLUMNS})`);
+      db.exec(`INSERT INTO registrations_new (${all.join(', ')}) SELECT ${all.join(', ')} FROM registrations`);
+      db.exec('DROP TABLE registrations; ALTER TABLE registrations_new RENAME TO registrations;');
+      db.exec('CREATE INDEX IF NOT EXISTS registrations_event ON registrations (event_id, id)');
+    })();
+    console.log('[upgrade] Email is now optional in the registrations table.');
+  }
 
   return { db, dataDir, backupDir, uploadsDir, defaultCharts, slugify };
 }
