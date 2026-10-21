@@ -1,4 +1,6 @@
-# Event registration platform
+# EventGate: Event Registration System
+
+**Version 1.0** · 21 October 2026 · Jupiter Systems, Inc.
 
 One system for many events. Each event gets its own registration page at `yourdomain.com/<event-address>`, with its own branding, form fields, confirmation email, name tag, check-in PIN, records, backups and client logins. Registrants receive a QR pass by email, and staff scan it at the door to check them in and print a name tag.
 
