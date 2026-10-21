@@ -42,7 +42,9 @@
   .meta span { display: block; }
   /* Same width as the form below, so the introduction lines up with the fields. */
   .lede { max-width: 640px; margin: 1.5rem 0 2.25rem; font-size: 1.05rem; }
-  @media (min-width: 561px) { .lede p, .lede li { text-align: justify; hyphens: auto; -webkit-hyphens: auto; } }
+  @media (min-width: 561px) { .lede p, .lede li { text-align: justify; } }
+  /* Never split words with a hyphen (e.g. "Fri-day"); whole words move to the next line. */
+  body { hyphens: manual; -webkit-hyphens: manual; }
   .lede p { margin: 0 0 .75rem; }
   .lede ul { margin: 0 0 .75rem; padding-left: 1.2rem; }
 
