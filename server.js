@@ -166,6 +166,7 @@ function publicEvent(ev) {
       fields: c.form.fields.filter((f) => f.enabled),
       consent: c.form.consent,
       submitLabel: c.form.submitLabel,
+      allowAnother: c.form.allowAnother,
       successTitle: c.form.successTitle,
       closedMessage: c.form.closedMessage,
     },
@@ -636,7 +637,7 @@ app.post('/api/admin/events/:id/logo', requireOwner, withEvent, express.raw({ ty
 
 // Email preview and test send use the settings being edited (not yet saved).
 function sampleValues(config) {
-  const sample = { text: 'Sample answer', textarea: 'Sample address, Clark Freeport Zone', phone_ph: '+63 9171234567', phone: '+65 6123 4567', number: '2', date: '2026-11-12', checkbox: 'Yes' };
+  const sample = { text: 'Sample answer', textarea: 'Sample address, Clark Freeport Zone', phone_ph: '+63 9171234567', phone: '+65 6123 4567', number: '2', date: '2026-11-12', checkbox: 'Yes', yesno: 'Yes' };
   const v = { first_name: 'Juan', last_name: 'dela Cruz', email: 'juan@example.com', designation: 'Operations Manager', company_name: 'Sample Company Inc.' };
   for (const f of config.form.fields) if (!v[f.key]) v[f.key] = f.options ? f.options[0] : sample[f.type] || 'Sample';
   return v;
