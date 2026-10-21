@@ -86,25 +86,27 @@
   #scanInput { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; cursor: text; font-size: 16px; }
   .reprint .btn { min-height: 40px; padding: .4rem 1rem; font-size: .92rem; }
 
-  /* ---------- the printed tag (only visible when printing) ---------- */
-  #tag { display: none; }
+  /* ---------- the printed tag ----------
+     Laid out off-screen all the time, so the text can be measured and shrunk to fit before printing. */
+  #tag {
+    position: fixed; left: -10000px; top: 0; visibility: hidden;
+    display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+    width: var(--tag-w); height: var(--tag-h); padding: 6% 7% 11%; box-sizing: border-box; overflow: hidden;
+    color: #000; background: #fff; font-family: var(--display); --fit: 1;
+  }
+  #tag .t-body { width: 100%; display: flex; flex-direction: column; align-items: center; }
+  #tag .t-ev { font: 700 calc(var(--tag-h) * .05 * var(--fit))/1.2 var(--body); text-transform: uppercase; letter-spacing: .06em; padding-bottom: .45em; margin-bottom: .7em; border-bottom: 1.5px solid #000; max-width: 100%; }
+  #tag .t-nm { font-weight: 800; line-height: 1.02; letter-spacing: -0.01em; overflow-wrap: anywhere; max-width: 100%; }
+  #tag .t-ds { font: 600 calc(var(--tag-h) * .085 * var(--fit))/1.2 var(--body); margin-top: .55em; overflow-wrap: anywhere; max-width: 100%; }
+  #tag .t-co { font: 400 calc(var(--tag-h) * .08 * var(--fit))/1.2 var(--body); margin-top: .15em; overflow-wrap: anywhere; max-width: 100%; }
+  #tag .t-logo { max-height: calc(var(--tag-h) * .14 * var(--fit)); max-width: 60%; width: auto; height: auto; display: block; margin: 0 auto calc(var(--tag-h) * .03); }
+  #tag .t-pw { position: absolute; left: 0; right: 0; bottom: 3.5%; display: flex; align-items: center; justify-content: center; gap: .45em; font: 400 calc(var(--tag-h) * .034)/1 var(--body); color: #555; }
+  #tag .t-pw img { height: calc(var(--tag-h) * .062); width: auto; display: block; }
   @media print {
     html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
     :root { padding: 0 !important; }
     main.wrap { display: none !important; }
-    #tag {
-      display: flex !important; flex-direction: column; justify-content: center; align-items: center; text-align: center;
-      width: var(--tag-w); height: var(--tag-h); padding: 6% 7%; box-sizing: border-box; overflow: hidden;
-      color: #000; font-family: var(--display); page-break-inside: avoid; break-inside: avoid;
-    }
-    #tag .t-ev { font: 700 calc(var(--tag-h) * .05)/1.2 var(--body); text-transform: uppercase; letter-spacing: .06em; padding-bottom: .45em; margin-bottom: .7em; border-bottom: 1.5px solid #000; max-width: 100%; }
-    #tag .t-nm { font-weight: 800; line-height: 1.02; letter-spacing: -0.01em; overflow-wrap: anywhere; }
-    #tag .t-ds { font: 600 calc(var(--tag-h) * .085)/1.2 var(--body); margin-top: .55em; overflow-wrap: anywhere; }
-    #tag { position: relative; padding-bottom: 11% !important; }
-    #tag .t-pw { position: absolute; left: 0; right: 0; bottom: 3.5%; display: flex; align-items: center; justify-content: center; gap: .45em; font: 400 calc(var(--tag-h) * .034)/1 var(--body); color: #555; }
-    #tag .t-pw img { height: calc(var(--tag-h) * .062); width: auto; display: block; }
-    #tag .t-co { font: 400 calc(var(--tag-h) * .08)/1.2 var(--body); margin-top: .15em; overflow-wrap: anywhere; }
-    #tag .t-logo { max-height: calc(var(--tag-h) * .14); max-width: 60%; width: auto; height: auto; display: block; margin: 0 auto calc(var(--tag-h) * .03); }
+    #tag { position: relative; left: 0; visibility: visible; page-break-inside: avoid; break-inside: avoid; }
   }
 </style>
 <style id="pageSize">@page { size: 4in 3in; margin: 0; } :root { --tag-w: 4in; --tag-h: 3in; }</style>
@@ -172,11 +174,13 @@
 </main>
 
 <div id="tag" aria-hidden="true">
-  <img class="t-logo" id="tLogo" alt="" hidden>
-  <div class="t-ev" id="tEv"></div>
-  <div class="t-nm" id="tNm"></div>
-  <div class="t-ds" id="tDs"></div>
-  <div class="t-co" id="tCo"></div>
+  <div class="t-body" id="tBody">
+    <img class="t-logo" id="tLogo" alt="" hidden>
+    <div class="t-ev" id="tEv"></div>
+    <div class="t-nm" id="tNm"></div>
+    <div class="t-ds" id="tDs"></div>
+    <div class="t-co" id="tCo"></div>
+  </div>
   <div class="t-pw">Powered by <img src="/jupiter-logo.png" alt=""></div>
 </div>
 
@@ -239,6 +243,24 @@
     $('pinForm').after(m);
   });
 
+  // Shrinks the text until everything fits on the label: first the name, then everything else a little.
+  function fitTag(len) {
+    const tag = $('tag'), body = $('tBody');
+    const start = len <= 14 ? .19 : len <= 20 ? .155 : len <= 28 ? .12 : len <= 40 ? .1 : .082;
+    let scale = start;
+    let fit = 1;
+    // the other lines never get bigger than 80% of the name
+    const apply = () => { fit = Math.min(fit, (scale * 0.8) / .085); $('tNm').style.fontSize = `calc(var(--tag-h) * ${scale})`; tag.style.setProperty('--fit', fit); };
+    const cs = getComputedStyle(tag);
+    const room = () => tag.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const fits = () => body.scrollHeight <= room() + 1 && body.scrollWidth <= body.clientWidth + 1;
+    apply();
+    for (let i = 0; i < 40 && !fits(); i++) {
+      // keep the name the biggest thing: shrink it a little, then the other lines, then the name again
+      if (scale > start * 0.72) scale *= 0.94; else if (fit > .5) fit *= 0.94; else if (scale > .055) scale *= 0.94; else break;
+      apply();
+    }
+  }
   function printTag(a) {
     $('tEv').textContent = eventName;
     $('tEv').hidden = !eventName;
@@ -248,10 +270,7 @@
     $('tDs').hidden = !a.line2;
     $('tCo').textContent = a.line3 || '';
     $('tCo').hidden = !a.line3;
-    // Shrink long names so they stay on the tag.
-    const len = a.name.length;
-    const scale = len <= 14 ? .19 : len <= 20 ? .155 : len <= 28 ? .12 : len <= 40 ? .1 : .082;
-    $('tNm').style.fontSize = `calc(var(--tag-h) * ${scale})`;
+    fitTag(a.name.length);
     setTimeout(() => window.print(), 50);
   }
   function addReprint(a) {
