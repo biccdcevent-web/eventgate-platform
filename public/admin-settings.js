@@ -125,13 +125,15 @@
     const c = draft.config;
     return {
       slug: draft.slug, status: draft.status === 'draft' ? 'open' : draft.status, full: false,
-      details: { name: c.details.name, date: c.details.date, venue: c.details.venue, organizer: c.details.organizer, intro: c.details.intro },
+      details: { name: c.details.name, date: shownDate(), venue: c.details.venue, organizer: c.details.organizer, intro: c.details.intro },
       branding: c.branding,
       form: { fields: c.form.fields.filter((f) => f.enabled), consent: c.form.consent, submitLabel: c.form.submitLabel, successTitle: c.form.successTitle, closedMessage: c.form.closedMessage },
       badge: c.badge,
       checkin: c.checkin,
     };
   }
+  // The date line as attendees will see it.
+  const shownDate = () => { const d = draft.config.details; return d.schedule && d.schedule.start ? EG.formatSchedule(d.schedule) : d.date; };
   function postPage() {
     const f = $('pageFrame');
     if (f && f.contentWindow) f.contentWindow.postMessage({ type: 'eg-preview', event: toPublic() }, location.origin);
@@ -158,6 +160,11 @@
     emailTimer = setTimeout(async () => {
       if (!draft || pview !== 'email') return;
       const seq = ++emailSeq;
+      if (draft.config.email.send === false) {
+        $('pvSubject').innerHTML = '<b>No email is sent for this event.</b> Turn on the confirmation email in the Email section to preview it.';
+        $('emailFrame').srcdoc = ''; $('emailFrame').style.height = '0px';
+        return;
+      }
       try {
         const r = await A.post(`/api/admin/events/${ev.id}/email-preview`, { config: draft.config });
         if (seq !== emailSeq) return;
@@ -186,7 +193,19 @@
   }
 
   let pageTimer = null;
+  // Keep the Email field and confirmation email consistent with the check-in options (the server applies the same rules).
+  function applyEmailRules() {
+    const c = draft.config;
+    if (c.checkin.qr) c.email.send = true;
+    const ef = c.form.fields.find((f) => f.key === 'email');
+    if (!ef) return;
+    const r = EG.emailRules(c);
+    if (r.enabledLocked) ef.enabled = true;
+    if (r.requiredLocked) ef.required = true;
+    if (!ef.enabled) ef.required = false;
+  }
   function changed() {
+    applyEmailRules();
     $('saveBar').hidden = !isDirty();
     $('saveErr').textContent = '';
     clearTimeout(pageTimer);
@@ -248,11 +267,13 @@
         </div></div>
       </section>
       <section class="card stack">
+        <div id="schedBox">${scheduleHtml()}</div>
+      </section>
+      <section class="card stack">
         <div class="two">
-          ${text('config.details.date', 'Date and time', { placeholder: 'e.g. Thursday, 12 November 2026, 8:00 AM', max: 120 })}
           ${text('config.details.venue', 'Venue', { placeholder: 'e.g. SMX Convention Center, Pasay City' })}
+          ${text('config.details.organizer', 'Organizer', { help: 'Shown in emails: “Sent by … because you registered.”', max: 120 })}
         </div>
-        ${text('config.details.organizer', 'Organizer', { help: 'Shown in emails: “Sent by … because you registered.”', max: 120 })}
         ${area('config.details.intro', 'Introduction on the registration page', { help: FORMAT_HELP, rows: 4, max: 2000 })}
         <div class="two">
           <div class="field"><label for="s_tz">Time zone</label><select id="s_tz" data-path="config.details.timezone">${EG.TIMEZONES.map(([z, l]) => `<option value="${z}"${z === draft.config.details.timezone ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select><p class="help">Used for dashboard times and exports.</p></div>
@@ -298,6 +319,15 @@
             <p class="err" id="logoErr"></p>
           </div>
         </div>
+        ${b.logo ? `<div class="two">
+          <div class="field"><span class="lbl">Position</span><div class="seg" role="group" aria-label="Logo position">
+            ${[['left', 'Left'], ['center', 'Centre'], ['right', 'Right']].map(([k, l]) => `<button type="button" data-logo-align="${k}" aria-pressed="${(b.logoAlign || 'left') === k}">${l}</button>`).join('')}
+          </div></div>
+          <div class="field"><span class="lbl">Size</span><div class="seg" role="group" aria-label="Logo size">
+            ${[['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']].map(([k, l]) => `<button type="button" data-logo-size="${k}" aria-pressed="${(b.logoSize || 'medium') === k}">${l}</button>`).join('')}
+          </div></div>
+        </div>
+        <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">Applies to the registration page and the email.</p>` : ''}
       </section>
       <section class="card stack">
         <h3>Colours</h3>
@@ -317,7 +347,7 @@
 
     form: () => `
       <section class="card stack">
-        <div class="an-head"><div><h3>Fields</h3><p class="sub" style="margin:0">First name, last name and email are always included. Use the switch to hide a field, the arrows to reorder.</p></div>
+        <div class="an-head"><div><h3>Fields</h3><p class="sub" style="margin:0">First name and last name are always included. Email is required while the event sends QR passes. Use the switch to hide a field, the arrows to reorder.</p></div>
           <button class="btn btn-primary btn-sm" type="button" id="addField">+ Add a field</button></div>
         <ul class="fields-list" id="fieldList">${draft.config.form.fields.map(fieldRow).join('')}</ul>
       </section>
@@ -340,8 +370,15 @@
       const c = draft.config;
       const chips = [...EG.PLACEHOLDERS, ...c.form.fields.filter((f) => f.enabled && !EG.PLACEHOLDERS.includes(f.key)).map((f) => f.key)];
       const summaryOpts = c.form.fields.filter((f) => f.enabled && !['first_name', 'last_name'].includes(f.key));
+      const qr = EG.emailMode(c) === 'qr';
+      const sendBox = qr ? '' : `<section class="card stack">
+        ${check('config.email.send', 'Send a confirmation email to each registrant')}
+        <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">${c.email.send ? 'Registrants who leave the email blank (if it’s optional) don’t get one.' : 'No emails are sent. You can now make the Email field optional or hide it in the Registration form section.'}</p>
+      </section>`;
+      if (!qr && !c.email.send) return sendBox;
       return `
-      ${EG.emailMode(c) !== 'qr' ? `<p class="notice info" style="margin:0">${EG.emailMode(c) === 'name' ? 'This event doesn’t use QR passes, so the email is a confirmation and attendees give their name at the desk.' : 'This event doesn’t use check-in, so the email is a simple confirmation without a QR code.'} You can change this in the Check-in section.</p>` : ''}
+      ${!qr ? `<p class="notice info" style="margin:0">${EG.emailMode(c) === 'name' ? 'This event doesn’t use QR passes, so the email is a confirmation and attendees give their name at the desk.' : 'This event doesn’t use check-in, so the email is a simple confirmation without a QR code.'} You can change this in the Check-in section.</p>` : ''}
+      ${sendBox}
       <section class="card stack">
         <div class="two">
           ${text('config.email.fromName', 'Sender name', { placeholder: c.details.name, max: 80, help: `Emails come from ${esc(platform.senderAddress || 'your MAIL_FROM address')}.` })}
@@ -380,9 +417,76 @@
     },
   };
 
+  // ---- event date and time
+  function timeOptions(selected, after, empty) {
+    return `<option value="">${esc(empty)}</option>` + EG.TIMES.filter((t) => !after || t > after)
+      .map((t) => `<option value="${t}"${t === selected ? ' selected' : ''}>${EG.timeLabel(t)}</option>`).join('');
+  }
+  function scheduleHtml() {
+    const d = draft.config.details, s = d.schedule;
+    const multi = s.days === 'multi';
+    const legacy = !s.start && d.date ? `<p class="notice info" style="margin:0">Currently shown as “${esc(d.date)}”. Choose a date below to replace it.</p>` : '';
+    return `<div class="stack">
+      <h3>Date and time</h3>
+      <div class="field"><span class="lbl">How long is the event?</span><div class="seg" role="group" aria-label="Event length">
+        <button type="button" data-days="one" aria-pressed="${!multi}">One day</button><button type="button" data-days="multi" aria-pressed="${multi}">Several days</button>
+      </div></div>
+      ${legacy}
+      <div class="two">
+        <div class="field"><label for="s_start">${multi ? 'First day' : 'Date'}</label><input id="s_start" type="date" class="date-pick" value="${esc(s.start)}"></div>
+        ${multi ? `<div class="field"><label for="s_end">Last day</label><input id="s_end" type="date" class="date-pick" value="${esc(s.end)}"${s.start ? ` min="${esc(s.start)}"` : ''}></div>` : ''}
+      </div>
+      <div class="two">
+        <div class="field"><label for="s_from">Start time</label><select id="s_from">${timeOptions(s.from, '', 'Choose a time')}</select></div>
+        <div class="field"><label for="s_to">End time <span style="font-weight:400;color:var(--muted)">(optional)</span></label><select id="s_to"${s.from ? '' : ' disabled'}>${timeOptions(s.to, s.from, s.from ? 'No end time' : 'Choose a start time first')}</select></div>
+      </div>
+      ${multi ? '<p class="help" style="margin:0;color:var(--muted);font-size:.86rem">The same start and end time apply to each day.</p>' : ''}
+      <p class="err" id="schedErr" role="alert"></p>
+      <p class="help" style="margin:0;color:var(--muted);font-size:.86rem" id="schedOut"></p>
+    </div>`;
+  }
+  function syncSchedule() {
+    const s = draft.config.details.schedule;
+    const problem = EG.scheduleProblem(s);
+    $('schedErr').textContent = problem;
+    $('schedOut').innerHTML = s.start ? `Shown on the registration page and email as: <b style="color:var(--ink)">${esc(EG.formatSchedule(s))}</b>` : 'Choose a date. It opens a calendar.';
+  }
+  function wireSchedule() {
+    const s = draft.config.details.schedule;
+    const box = $('schedBox');
+    const redraw = () => { box.innerHTML = scheduleHtml(); wireSchedule(); };
+    box.querySelectorAll('[data-days]').forEach((b) => b.addEventListener('click', () => {
+      s.days = b.dataset.days;
+      if (s.days === 'one') s.end = '';
+      redraw(); changed();
+      box.querySelector(`[data-days="${s.days}"]`).focus();
+    }));
+    // Clicking anywhere in a date box opens the calendar.
+    box.querySelectorAll('.date-pick').forEach((el) => el.addEventListener('click', () => { try { el.showPicker(); } catch {} }));
+    $('s_start').addEventListener('change', (e) => {
+      s.start = e.target.value;
+      if ($('s_end')) { $('s_end').min = s.start; if (s.end && s.end <= s.start) { s.end = ''; $('s_end').value = ''; } }
+      syncSchedule(); changed();
+    });
+    if ($('s_end')) $('s_end').addEventListener('change', (e) => { s.end = e.target.value; syncSchedule(); changed(); });
+    $('s_from').addEventListener('change', (e) => {
+      s.from = e.target.value;
+      if (!s.from || (s.to && s.to <= s.from)) s.to = '';
+      const to = $('s_to');
+      to.innerHTML = timeOptions(s.to, s.from, s.from ? 'No end time' : 'Choose a start time first');
+      to.disabled = !s.from;
+      syncSchedule(); changed();
+    });
+    $('s_to').addEventListener('change', (e) => { s.to = e.target.value; syncSchedule(); changed(); });
+    syncSchedule();
+  }
+
   // ---- fields list
   function fieldRow(f, i, all) {
+    const rules = EG.emailRules(draft.config);
     const locked = EG.LOCKED.includes(f.key);
+    const lockShown = locked || (f.key === 'email' && rules.enabledLocked);
+    const lockRequired = locked || (f.key === 'email' && rules.requiredLocked);
     const builtin = EG.BUILTIN.includes(f.key);
     const n = (all || draft.config.form.fields).length;
     const typeChoices = builtin ? (f.key === 'contact_number' ? ['phone_ph', 'phone', 'text'] : f.key === 'company_address' ? ['address_ph', 'textarea', 'text'] : [f.type]) : Object.keys(EG.FIELD_TYPES).filter((t) => t !== 'email');
@@ -395,7 +499,7 @@
         </div>
         <div class="ftitle"><b data-title>${esc(f.label)}</b><span data-meta>${esc(fieldTypeLabel(f.type))} · ${f.required ? 'Required' : 'Optional'} · ${f.width === 'full' ? 'Full width' : 'Half width'}</span></div>
         <div class="fctl">
-          <label class="switch" title="${locked ? 'Always shown' : 'Show on the form'}"><input type="checkbox" data-f="enabled"${f.enabled ? ' checked' : ''}${locked ? ' disabled' : ''} aria-label="Show ${esc(f.label)} on the form"></label>
+          <label class="switch" title="${lockShown ? 'Always shown' : 'Show on the form'}"><input type="checkbox" data-f="enabled"${f.enabled ? ' checked' : ''}${lockShown ? ' disabled' : ''} aria-label="Show ${esc(f.label)} on the form"></label>
           <button class="btn btn-quiet btn-sm" type="button" data-f-act="edit" aria-expanded="${isOpen}">${isOpen ? 'Done' : 'Edit'}</button>
         </div>
       </div>
@@ -406,8 +510,11 @@
         </div>
         <div class="two">
           <div class="field"><label>Width</label><select data-f="width"><option value="half"${f.width !== 'full' ? ' selected' : ''}>Half width</option><option value="full"${f.width === 'full' ? ' selected' : ''}>Full width</option></select></div>
-          <div class="field"><span class="lbl">&nbsp;</span><label class="check"><input type="checkbox" data-f="required"${f.required ? ' checked' : ''}${locked ? ' disabled' : ''}> <span>Required</span></label></div>
+          <div class="field"><span class="lbl">&nbsp;</span><label class="check"><input type="checkbox" data-f="required"${f.required ? ' checked' : ''}${lockRequired || !f.enabled ? ' disabled' : ''}> <span>Required</span></label></div>
         </div>
+        ${f.key === 'email' ? `<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">${rules.requiredLocked ? 'Required while the event sends QR passes, because the pass is emailed to this address. To make it optional, turn off QR passes in the Check-in section.'
+          : rules.enabledLocked ? 'Can be optional because this event has no QR pass. Registrants who leave it blank won’t get a confirmation email. To remove it from the form, turn off the confirmation email in the Email section.'
+          : 'The event sends no confirmation email, so you can make this optional or hide it.'}</p>` : ''}
         ${f.type === 'address_ph' ? '<p class="help" style="margin:0">Registrants type the unit, floor, building and street, then choose the region, province, city or municipality and barangay from lists (PSA 2025 data). The postal code fills in automatically when the city has only one.</p>' : ''}
         ${f.type === 'checkbox' ? '' : `<div class="field"><label>${['select'].includes(f.type) ? 'Text shown before a choice is made' : 'Example text inside the box'}</label><input type="text" data-f="placeholder" value="${esc(f.placeholder)}" maxlength="80"></div>`}
         <div class="field"><label>Help text under the field</label><input type="text" data-f="help" value="${esc(f.help)}" maxlength="160"></div>
@@ -425,7 +532,7 @@
     details(body) {
       body.querySelectorAll('input[name="s_status"]').forEach((r) => r.addEventListener('change', () => { draft.status = r.value; changed(); }));
       $('s_slug').addEventListener('input', (e) => { const s = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'); if (s !== e.target.value) e.target.value = s; draft.slug = s; changed(); });
-
+      wireSchedule();
     },
     checkin(body) {
       if ($('pinGen')) $('pinGen').addEventListener('click', () => { const pin = String(100000 + Math.floor(Math.random() * 900000)); $('s_pin').value = pin; draft.staffPin = pin; changed(); });
@@ -462,6 +569,13 @@
         Object.assign(draft.config.branding, { primary: '#E00000', secondary: '#141414', background: '#F2F2F2' });
         renderSection(); changed();
       });
+      for (const [attr, key] of [['logoAlign', 'logoAlign'], ['logoSize', 'logoSize']]) {
+        body.querySelectorAll(`[data-${attr === 'logoAlign' ? 'logo-align' : 'logo-size'}]`).forEach((btn) => btn.addEventListener('click', () => {
+          draft.config.branding[key] = btn.dataset[attr];
+          btn.parentElement.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
+          changed();
+        }));
+      }
       body.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('click', () => {
         draft.config.branding.textSize = b.dataset.size;
         body.querySelectorAll('[data-size]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
@@ -545,6 +659,9 @@
       list.addEventListener('change', (e) => { if (e.target.matches('select, input[type=checkbox]')) onEdit(e); });
     },
     email(body) {
+      const sendBox = body.querySelector('[data-path="config.email.send"]');
+      if (sendBox) sendBox.addEventListener('change', () => { applyEmailRules(); renderSection(); });
+      if (!$('phChips')) return;
       let lastArea = $('s_config.email.body');
       body.querySelectorAll('textarea, input[type=text]').forEach((el) => el.addEventListener('focus', () => { if (el.dataset.path && /email\.(body|subject|footer)$/.test(el.dataset.path)) lastArea = el; }));
       $('phChips').addEventListener('click', (e) => {
@@ -591,6 +708,12 @@
   // ------------------------------------------------------------ save
   async function save() {
     const btn = $('saveBtn');
+    const problem = EG.scheduleProblem(draft.config.details.schedule);
+    if (problem) {
+      $('saveErr').textContent = `Date and time: ${problem}`;
+      if (section !== 'details') showSection('details');
+      return;
+    }
     btn.disabled = true;
     $('saveErr').textContent = '';
     try {

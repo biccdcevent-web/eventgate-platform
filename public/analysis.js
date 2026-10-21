@@ -118,7 +118,7 @@
     };
     if (DIMS[dim].kind === 'cat') {
       for (const r of rows) {
-        const raw = dim === 'emailDomain' ? (r.email.split('@')[1] || '(none)') : dim === 'company' ? r.company : dim === 'designation' ? r.designation : DIMS[dim].part ? ((r.values || {})[`${DIMS[dim].field}__parts`] || {})[DIMS[dim].part] : (r.values || {})[DIMS[dim].field];
+        const raw = dim === 'emailDomain' ? ((r.email || '').split('@')[1] || '(none)') : dim === 'company' ? r.company : dim === 'designation' ? r.designation : DIMS[dim].part ? ((r.values || {})[`${DIMS[dim].field}__parts`] || {})[DIMS[dim].part] : (r.values || {})[DIMS[dim].field];
         const label = String(raw || '(blank)').trim();
         add(normKey(label), label, label, r);
       }

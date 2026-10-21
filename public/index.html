@@ -34,11 +34,15 @@
   .wrap.single { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
 
   /* ---------- intro ---------- */
-  .brand-logo { display: block; max-height: 76px; max-width: min(280px, 100%); width: auto; height: auto; margin: 0 0 1.5rem; }
+  /* Logo size and position come from the event's branding settings. */
+  .logo-row { max-width: 640px; }  /* same width as the form, so a centred or right-aligned logo lines up with it */
+  .brand-logo { display: block; max-height: var(--logo-h, 76px); max-width: min(var(--logo-w, 280px), 100%); width: auto; height: auto; margin: 0 var(--logo-mr, auto) 1.5rem var(--logo-ml, 0); }
   h1 { font: 700 clamp(2.1rem, 5.4vw, 3.6rem)/1.04 var(--display); letter-spacing: -0.02em; margin: 0 0 1rem; overflow-wrap: anywhere; }
   .meta { margin: 0; color: var(--muted); font-size: 1.02rem; }
   .meta span { display: block; }
-  .lede { max-width: 56ch; margin: 1.5rem 0 2.25rem; font-size: 1.05rem; }
+  /* Same width as the form below, so the introduction lines up with the fields. */
+  .lede { max-width: 640px; margin: 1.5rem 0 2.25rem; font-size: 1.05rem; }
+  @media (min-width: 561px) { .lede p, .lede li { text-align: justify; hyphens: auto; -webkit-hyphens: auto; } }
   .lede p { margin: 0 0 .75rem; }
   .lede ul { margin: 0 0 .75rem; padding-left: 1.2rem; }
 
@@ -58,7 +62,7 @@
   .field select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 20px) 50%, calc(100% - 14px) 50%; background-size: 6px 6px; background-repeat: no-repeat; padding-right: 2.4rem; }
   .field textarea { resize: vertical; min-height: 84px; }
   .field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible { outline: 3px solid color-mix(in srgb, var(--ink) 22%, transparent); outline-offset: 0; border-color: var(--ink); }
-  .field.invalid input, .field.invalid textarea, .field.invalid select, .field.invalid .phone, .field.invalid .choices { border-color: var(--error); }
+  .field.invalid input:not([type=checkbox]):not([type=radio]), .field.invalid textarea, .field.invalid select, .field.invalid .phone, .field.invalid .choices { border-color: var(--error); }
   .err { color: var(--error); font-size: .86rem; margin: .3rem 0 0; }
   .err:empty { display: none; }
   .hint { color: var(--muted); font-size: .84rem; margin: .3rem 0 0; }
@@ -148,7 +152,7 @@
 <body>
 <main class="wrap" id="wrap">
   <section id="main">
-    <img class="brand-logo" id="logo" alt="" hidden>
+    <div class="logo-row"><img class="brand-logo" id="logo" alt="" hidden></div>
     <h1 id="evName">Event registration</h1>
     <p class="meta"><span id="evDate"></span><span id="evVenue"></span></p>
     <div class="lede" id="intro"></div>
@@ -240,6 +244,12 @@
     if (url && $('fontLink').href !== url) $('fontLink').href = url;
     const logo = $('logo');
     if (b.logo) { logo.src = b.logo; logo.alt = ev ? (ev.details.organizer || ev.details.name) : ''; logo.hidden = false; } else logo.hidden = true;
+    const [lh, lw] = (EG.LOGO_SIZES[b.logoSize] || EG.LOGO_SIZES.medium).page;
+    logo.style.setProperty('--logo-h', `${lh}px`);
+    logo.style.setProperty('--logo-w', `${lw}px`);
+    const align = b.logoAlign || 'left';
+    logo.style.setProperty('--logo-ml', align === 'left' ? '0' : 'auto');
+    logo.style.setProperty('--logo-mr', align === 'right' ? '0' : 'auto');
   }
 
   // ---------- form fields ----------
@@ -248,7 +258,9 @@
     const id = `f_${f.key}`;
     const req = f.required ? 'required' : '';
     const opt = f.required ? '' : ' <span class="opt">(optional)</span>';
-    const ph = f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '';
+    // The standard email hint mentions the pass, which events without a QR pass don't have.
+    const phText = f.key === 'email' && f.placeholder === 'Your pass is sent here' && ev.checkin && !ev.checkin.qr ? 'name@company.com' : f.placeholder;
+    const ph = phText ? ` placeholder="${esc(phText)}"` : '';
     const auto = { first_name: 'given-name', last_name: 'family-name', email: 'email', designation: 'organization-title', company_name: 'organization', company_address: 'street-address', contact_number: 'tel-national' }[f.key] || 'off';
     const help = f.help ? `<p class="hint" id="${id}-hint">${esc(f.help)}</p>` : '';
     const desc = f.help ? ` aria-describedby="${id}-hint"` : '';
@@ -464,6 +476,15 @@
     if (k) setError(k, '');
   });
   form.addEventListener('change', (e) => { syncBadge(); const k = fieldKeyOf(e.target); if (k) setError(k, ''); });
+  // Email and phone numbers are checked as soon as the registrant leaves the box, so slips like a comma
+  // instead of a period are caught straight away.
+  form.addEventListener('focusout', (e) => {
+    const k = e.target.name;
+    const f = k && fields.find((x) => x.key === k);
+    if (!f || !['email', 'phone_ph', 'phone'].includes(f.type) || !e.target.value.trim()) return;
+    const r = EG.checkField(f, e.target.value);
+    setError(k, r.error || '');
+  });
 
   // keep typed answers when the preview settings change
   function collectRaw() { const o = {}; fields.forEach((f) => { if (f.type !== 'address_ph') o[f.key] = valueOf(f.key); }); return o; }
@@ -561,7 +582,8 @@
       // No QR pass for this event: just confirm.
       $('download').hidden = true;
       const ck = ev.checkin || {};
-      $('doneMsg').textContent = p.emailSent ? `We've emailed a confirmation to ${p.email}.` : `Your registration is saved. We couldn't send the confirmation email to ${p.email}.`;
+      $('doneMsg').textContent = !p.emailing ? 'Thank you. Your registration is saved.'
+        : p.emailSent ? `We've emailed a confirmation to ${p.email}.` : `Your registration is saved. We couldn't send the confirmation email to ${p.email}.`;
       $('doneHint').textContent = ck.enabled ? 'When you arrive, just give your name at the registration desk.' : '';
       $('doneTitle').focus();
       return;

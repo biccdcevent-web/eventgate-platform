@@ -499,6 +499,7 @@
     $('tOut').textContent = nf.format(t.notArrived);
     $('coTile').hidden = t.companies === null;
     $('tCo').textContent = nf.format(t.companies || 0);
+    $('emailTile').hidden = Boolean(t.emailsOff);
     $('tMail').textContent = nf.format(t.emailsPending);
     $('emailTile').classList.toggle('warn', t.emailsPending > 0);
     $('tMailNote').innerHTML = t.emailsPending > 0 ? `${ICON.warn}<span>Check the email settings on the server</span>` : '<span>All emails were sent</span>';

@@ -147,9 +147,12 @@
   .two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
   @media (min-width: 560px) { .two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .field label, .field .lbl { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 5px; }
-  .field input[type=text], .field input[type=password], .field input[type=email], .field input[type=number], .field select, .field textarea {
+  .field input[type=text], .field input[type=password], .field input[type=email], .field input[type=number], .field input[type=date], .field select, .field textarea {
     width: 100%; font: inherit; color: var(--ink); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 10px; padding: .55rem .7rem; min-height: 44px;
   }
+  .field input[type=date] { cursor: pointer; }
+  .field input[type=date]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .7; }
+  .field select:disabled { opacity: .6; }
   .field textarea { min-height: 96px; resize: vertical; line-height: 1.5; }
   .field .help { color: var(--muted); font-size: .82rem; margin: 4px 0 0; }
   .field .warn-text { color: var(--warn); font-size: .82rem; margin: 4px 0 0; font-weight: 600; }
@@ -273,6 +276,8 @@
   .meter { height: 14px; background: var(--track); border-radius: 999px; overflow: hidden; }
   .meter span { display: block; height: 100%; background: var(--series); border-radius: 999px; transition: width .6s ease; }
   .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  /* When a tile is hidden (no emails, no companies), the last visible tile fills the row. */
+  .tiles > #coTile:not([hidden]):has(+ #emailTile[hidden]) { grid-column: 1 / -1; }
   .tile { background: var(--surface); border-radius: 16px; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; }
   .tile .label { color: var(--muted); font-weight: 600; font-size: .92rem; }
   .tile .value { font: 600 2.1rem/1.1 var(--body); }
