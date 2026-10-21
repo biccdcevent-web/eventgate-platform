@@ -35,9 +35,22 @@
 
   /* ---------- intro ---------- */
   /* Logo size and position come from the event's branding settings. */
-  .logo-row { max-width: 640px; }  /* same width as the form, so a centred or right-aligned logo lines up with it */
+  .logo-row { max-width: 640px; }
+  /* Logo beside the event name (left or right of it) */
+  .title-row.beside { display: flex; align-items: center; gap: clamp(1rem, 3vw, 1.75rem); max-width: 640px; margin-bottom: 1rem; }
+  .title-row.beside.on-right { flex-direction: row-reverse; justify-content: flex-end; }
+  .title-row.beside h1 { flex: 1; min-width: 0; margin: 0; }
+  .title-row.beside .logo-row { flex: none; max-width: 38%; }
+  .title-row.beside .brand-logo { margin: 0; }
+  /* Phones: not enough room beside the name, so the logo goes above it */
+  @media (max-width: 560px) {
+    .title-row.beside, .title-row.beside.on-right { display: block; }
+    .title-row.beside .logo-row { max-width: none; }
+    .title-row.beside .brand-logo { margin: 0 0 1.25rem; }
+    .title-row.beside h1 { margin: 0 0 1rem; }
+  }  /* same width as the form, so a centred or right-aligned logo lines up with it */
   .brand-logo { display: block; max-height: var(--logo-h, 76px); max-width: min(var(--logo-w, 280px), 100%); width: auto; height: auto; margin: 0 var(--logo-mr, auto) 1.5rem var(--logo-ml, 0); }
-  h1 { font: 700 clamp(2.1rem, 5.4vw, 3.6rem)/1.04 var(--display); letter-spacing: -0.02em; margin: 0 0 1rem; overflow-wrap: anywhere; }
+  h1 { font: 700 clamp(2.1rem, 5.4vw, 3.6rem)/1.04 var(--display); letter-spacing: -0.02em; margin: 0 0 1rem; overflow-wrap: break-word; }
   .meta { margin: 0; color: var(--muted); font-size: 1.02rem; }
   .meta span { display: block; }
   /* Same width as the form below, so the introduction lines up with the fields. */
@@ -128,12 +141,12 @@
   .card { width: 100%; background: #FFFFFF; color: #141414; border-radius: 16px; overflow: hidden; margin-top: -10px; box-shadow: 0 1px 0 rgba(22, 34, 58, .05), 0 22px 44px -22px rgba(22, 34, 58, .55); transform-origin: 50% 0; }
   .band { background: var(--primary); color: var(--on-primary); padding: 12px 20px 18px; }
   .slot { width: 52px; height: 9px; border-radius: 5px; background: var(--bg); margin: 0 auto 14px; }
-  .band .ev { font: 700 1.02rem/1.2 var(--display); overflow-wrap: anywhere; }
+  .band .ev { font: 700 1.02rem/1.2 var(--display); overflow-wrap: break-word; }
   .band .when { font-size: .8rem; opacity: .88; margin-top: 3px; }
   .who { padding: 22px 20px 6px; }
-  .who .nm { font: 700 1.85rem/1.04 var(--display); letter-spacing: -0.015em; overflow-wrap: anywhere; min-height: 1.04em; }
-  .who .ds { margin-top: 10px; font-weight: 700; font-size: .98rem; overflow-wrap: anywhere; }
-  .who .co { color: #5C5C5C; font-size: .95rem; overflow-wrap: anywhere; }
+  .who .nm { font: 700 1.85rem/1.04 var(--display); letter-spacing: -0.015em; overflow-wrap: break-word; min-height: 1.04em; }
+  .who .ds { margin-top: 10px; font-weight: 700; font-size: .98rem; overflow-wrap: break-word; }
+  .who .co { color: #5C5C5C; font-size: .95rem; overflow-wrap: break-word; }
   .who .ghost { color: #ADADAD; }
   .pass { display: flex; align-items: flex-end; gap: 14px; padding: 16px 20px 22px; }
   .qr { width: 132px; aspect-ratio: 1; flex: none; border: 1.5px dashed #D4D4D4; border-radius: 10px; display: grid; place-items: center; text-align: center; font-size: .74rem; line-height: 1.35; color: #7A7A7A; padding: 10px; }
@@ -156,8 +169,10 @@
 <body>
 <main class="wrap" id="wrap">
   <section id="main">
-    <div class="logo-row"><img class="brand-logo" id="logo" alt="" hidden></div>
-    <h1 id="evName">Event registration</h1>
+    <div class="title-row" id="titleRow">
+      <div class="logo-row"><img class="brand-logo" id="logo" alt="" hidden></div>
+      <h1 id="evName">Event registration</h1>
+    </div>
     <p class="meta"><span id="evDate"></span><span id="evVenue"></span></p>
     <div class="lede" id="intro"></div>
 
@@ -254,6 +269,9 @@
     const align = b.logoAlign || 'left';
     logo.style.setProperty('--logo-ml', align === 'left' ? '0' : 'auto');
     logo.style.setProperty('--logo-mr', align === 'right' ? '0' : 'auto');
+    const place = b.logo ? b.logoPlace || 'above' : 'above';
+    $('titleRow').classList.toggle('beside', place !== 'above');
+    $('titleRow').classList.toggle('on-right', place === 'right');
   }
 
   // ---------- form fields ----------

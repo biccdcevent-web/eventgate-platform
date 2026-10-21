@@ -100,7 +100,9 @@
   #tag {
     position: fixed; left: -10000px; top: 0; visibility: hidden;
     display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
-    width: var(--tag-w); height: var(--tag-h); padding: 6% 7% 11%; box-sizing: border-box; overflow: hidden;
+    width: var(--tag-w); height: var(--tag-h); box-sizing: border-box;
+    /* margins in label units (a % here would follow the screen width while the tag is measured off-screen) */
+    padding: calc(var(--tag-w) * .06) calc(var(--tag-w) * .07) calc(var(--tag-w) * .11); overflow: hidden;
     color: #000; background: #fff; font-family: var(--display); --fit: 1;
   }
   #tag .t-body { width: 100%; display: flex; flex-direction: column; align-items: center; }
@@ -108,7 +110,15 @@
   #tag .t-nm { font-weight: 800; line-height: 1.02; letter-spacing: -0.01em; overflow-wrap: anywhere; max-width: 100%; }
   #tag .t-ds { font: 600 calc(var(--tag-h) * .085 * var(--fit))/1.2 var(--body); margin-top: .55em; overflow-wrap: anywhere; max-width: 100%; }
   #tag .t-co { font: 400 calc(var(--tag-h) * .08 * var(--fit))/1.2 var(--body); margin-top: .15em; overflow-wrap: anywhere; max-width: 100%; }
-  #tag .t-logo { max-height: calc(var(--tag-h) * .14 * var(--fit)); max-width: 60%; width: auto; height: auto; display: block; margin: 0 auto calc(var(--tag-h) * .03); }
+  /* The logo sits above the event name, or beside it (left or right). */
+  #tag .t-head { width: 100%; display: flex; flex-direction: column; align-items: center; }
+  #tag .t-head.beside { flex-direction: row; justify-content: center; gap: calc(var(--tag-w) * .03); margin-bottom: .7em; align-items: center; }
+  #tag .t-head.beside.on-right { flex-direction: row-reverse; }
+  #tag .t-head.beside .t-logo { margin: 0; align-self: center; flex: none; max-width: 40%; }
+  #tag .t-head.beside .t-ev { margin-bottom: 0; text-align: left; }
+  #tag .t-head.beside.on-right .t-ev { text-align: right; }
+  /* Logo size and position come from the event's Name tag settings. */
+  #tag .t-logo { max-height: calc(var(--tag-h) * var(--logo-h, .14) * var(--fit)); max-width: var(--logo-w, 60%); width: auto; height: auto; display: block; margin: 0 0 calc(var(--tag-h) * .03); align-self: var(--logo-self, center); }
   #tag .t-pw { position: absolute; left: 0; right: 0; bottom: 3.5%; display: flex; align-items: center; justify-content: center; gap: .45em; font: 400 calc(var(--tag-h) * .034)/1 var(--body); color: #555; }
   #tag .t-pw img { height: calc(var(--tag-h) * .062); width: auto; display: block; }
   @media print {
@@ -190,8 +200,10 @@
 
 <div id="tag" aria-hidden="true">
   <div class="t-body" id="tBody">
-    <img class="t-logo" id="tLogo" alt="" hidden>
-    <div class="t-ev" id="tEv"></div>
+    <div class="t-head" id="tHead">
+      <img class="t-logo" id="tLogo" alt="" hidden>
+      <div class="t-ev" id="tEv"></div>
+    </div>
     <div class="t-nm" id="tNm"></div>
     <div class="t-ds" id="tDs"></div>
     <div class="t-co" id="tCo"></div>
@@ -210,6 +222,7 @@
   let busy = false;
   let eventName = '';
   let tagLogo = null;
+  let tagPlace = 'above';
   const slug = decodeURIComponent(location.pathname.split('/')[1] || '');
   const API = `/api/e/${encodeURIComponent(slug)}`;
   const PIN_KEY = `staffPin:${slug}`;
@@ -263,6 +276,12 @@
     if (url) $('fontLink').href = url;
     tagLogo = b.logoOnTag && b.logo ? b.logo : null;
     if (tagLogo) { $('tLogo').src = tagLogo; }
+    const [lh, lw] = (EG.LOGO_SIZES[b.tagLogoSize] || EG.LOGO_SIZES.medium).tag;
+    const align = b.tagLogoAlign || 'center', ts = $('tag').style;
+    ts.setProperty('--logo-h', lh);
+    ts.setProperty('--logo-w', `${lw * 100}%`);
+    ts.setProperty('--logo-self', { left: 'flex-start', center: 'center', right: 'flex-end' }[align]);
+    tagPlace = b.tagLogoPlace || 'above';
     if (ev.status === 'archived') throw new Error('ended');
     ck = ev.checkin || ck;
     if (!ck.enabled) throw new Error('off');
@@ -301,6 +320,10 @@
     $('tEv').textContent = eventName;
     $('tEv').hidden = !eventName;
     $('tLogo').hidden = !tagLogo;
+    // beside the event name only when both are printed
+    const beside = Boolean(tagLogo && eventName) && tagPlace !== 'above';
+    $('tHead').classList.toggle('beside', beside);
+    $('tHead').classList.toggle('on-right', beside && tagPlace === 'right');
     $('tNm').textContent = a.name;
     $('tDs').textContent = a.line2 || '';
     $('tDs').hidden = !a.line2;

@@ -186,8 +186,13 @@
     const box = $('tagPrev');
     box.style.setProperty('--tag-font', EG.fontStack(c.branding.headingFont));
     box.style.setProperty('--tag-body', EG.fontStack(c.branding.bodyFont));
-    box.innerHTML = `${c.branding.logoOnTag && c.branding.logo ? `<img class="t-logo" src="${esc(c.branding.logo)}" alt="">` : ''}
-      ${b.showEventName ? `<div class="t-ev">${esc(c.details.name)}</div>` : ''}
+    const [lh, lw] = (EG.LOGO_SIZES[c.branding.tagLogoSize] || EG.LOGO_SIZES.medium).tag;
+    const self = { left: 'flex-start', center: 'center', right: 'flex-end' }[c.branding.tagLogoAlign || 'center'];
+    const logoOn = c.branding.logoOnTag && c.branding.logo;
+    const place = logoOn && b.showEventName ? c.branding.tagLogoPlace || 'above' : 'above';
+    const img = logoOn ? `<img class="t-logo" src="${esc(c.branding.logo)}" alt="" style="max-height:${lh * 100}cqh;max-width:${place === 'above' ? lw * 100 : 40}%;align-self:${place === 'above' ? self : 'center'}${place === 'above' ? '' : ';margin:0'}">` : '';
+    const ev = b.showEventName ? `<div class="t-ev"${place === 'above' ? '' : ` style="margin:0;text-align:${place === 'left' ? 'left' : 'right'}"`}>${esc(c.details.name)}</div>` : '';
+    box.innerHTML = `${place === 'above' ? img + ev : `<div class="t-head-row" style="display:flex;align-items:center;justify-content:center;gap:3cqw;margin-bottom:.7em;flex-direction:${place === 'left' ? 'row' : 'row-reverse'}">${img}${ev}</div>`}
       <div class="t-nm">Juan dela Cruz</div>
       ${b.line2 ? `<div class="t-ds">${esc(val(b.line2))}</div>` : ''}
       ${b.line3 ? `<div class="t-co">${esc(val(b.line3))}</div>` : ''}
@@ -223,6 +228,29 @@
   const area = (path, label, { help = '', rows = 4, max = 4000 } = {}) =>
     `<div class="field"><label for="s_${path}">${esc(label)}</label><textarea id="s_${path}" data-path="${path}" rows="${rows}" maxlength="${max}">${esc(v(path))}</textarea>${help ? `<p class="help">${help}</p>` : ''}</div>`;
   const check = (path, label) => `<label class="check"><input type="checkbox" data-path="${path}"${getPath(path) ? ' checked' : ''}> <span>${esc(label)}</span></label>`;
+  // Position and size buttons for the logo in one place (page, email or name tag).
+  function logoControls(alignKey, sizeKey, note) {
+    const b = draft.config.branding;
+    if (!b.logo) return '';
+    const placeKey = alignKey.replace('Align', 'Place');
+    const above = (b[placeKey] || 'above') === 'above';
+    const seg = (key, label, opts, def) => `<div class="field"><span class="lbl">${label}</span><div class="seg" role="group" aria-label="Logo ${label.toLowerCase()}">
+      ${opts.map(([k, l]) => `<button type="button" data-logo-key="${key}" data-logo-val="${k}" aria-pressed="${(b[key] || def) === k}">${l}</button>`).join('')}</div></div>`;
+    return `${seg(placeKey, 'Logo placement', [['above', 'Above the event name'], ['left', 'Left of the name'], ['right', 'Right of the name']], 'above')}
+      <div class="two">
+        ${above ? seg(alignKey, 'Logo position', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], alignKey === 'tagLogoAlign' ? 'center' : 'left') : ''}
+        ${seg(sizeKey, 'Logo size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'medium')}
+      </div>${placeKey === 'tagLogoPlace' && !above && !draft.config.badge.showEventName ? '<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">The event name isn’t printed, so the logo goes above the attendee’s name.</p>' : ''}${note ? `<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">${note}</p>` : ''}`;
+  }
+  function wireLogoControls(body) {
+    body.querySelectorAll('[data-logo-key]').forEach((btn) => btn.addEventListener('click', () => {
+      draft.config.branding[btn.dataset.logoKey] = btn.dataset.logoVal;
+      changed();
+      // placement shows or hides the left/centre/right choice
+      if (/Place$|^logoPlace$/.test(btn.dataset.logoKey)) { renderSection(); const again = $('secBody').querySelector(`[data-logo-key="${btn.dataset.logoKey}"][data-logo-val="${btn.dataset.logoVal}"]`); if (again) again.focus(); }
+      else btn.parentElement.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
+    }));
+  }
   const FORMAT_HELP = 'Leave a blank line between paragraphs. Start lines with “- ” for a bulleted list, and wrap words in **double asterisks** for bold.';
 
   function bind(container) {
@@ -248,6 +276,8 @@
     if (!body) return;
     body.innerHTML = RENDER[section]();
     bind(body);
+    wireLogoControls(body);
+    body.querySelectorAll('[data-path="config.branding.logoInEmail"], [data-path="config.branding.logoOnTag"]').forEach((el) => el.addEventListener('change', () => renderSection()));
     (WIRE[section] || (() => {}))(body);
   }
 
@@ -321,15 +351,7 @@
             <p class="err" id="logoErr"></p>
           </div>
         </div>
-        ${b.logo ? `<div class="two">
-          <div class="field"><span class="lbl">Position</span><div class="seg" role="group" aria-label="Logo position">
-            ${[['left', 'Left'], ['center', 'Centre'], ['right', 'Right']].map(([k, l]) => `<button type="button" data-logo-align="${k}" aria-pressed="${(b.logoAlign || 'left') === k}">${l}</button>`).join('')}
-          </div></div>
-          <div class="field"><span class="lbl">Size</span><div class="seg" role="group" aria-label="Logo size">
-            ${[['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']].map(([k, l]) => `<button type="button" data-logo-size="${k}" aria-pressed="${(b.logoSize || 'medium') === k}">${l}</button>`).join('')}
-          </div></div>
-        </div>
-        <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">Applies to the registration page and the email.</p>` : ''}
+        ${logoControls('logoAlign', 'logoSize', 'On the registration page. The email and name tag have their own logo settings in their sections.')}
       </section>
       <section class="card stack">
         <h3>Colours</h3>
@@ -396,6 +418,7 @@
         </div><p class="help">The attendee's name is always listed.</p></div>
         ${area('config.email.footer', 'Note at the bottom', { rows: 3, max: 1000 })}
         ${check('config.branding.logoInEmail', 'Show the event logo in the email')}
+        ${c.branding.logoInEmail ? logoControls('emailLogoAlign', 'emailLogoSize') : ''}
       </section>
       <section class="card stack">
         <h3>Send a test</h3>
@@ -417,6 +440,7 @@
         </div>
         ${check('config.badge.showEventName', 'Show the event name at the top')}
         ${check('config.branding.logoOnTag', 'Print the event logo (in black and white on most label printers)')}
+        ${c.branding.logoOnTag ? logoControls('tagLogoAlign', 'tagLogoSize') : ''}
       </section>`;
     },
   };
@@ -577,13 +601,6 @@
         Object.assign(draft.config.branding, { primary: '#E00000', secondary: '#141414', background: '#F2F2F2' });
         renderSection(); changed();
       });
-      for (const [attr, key] of [['logoAlign', 'logoAlign'], ['logoSize', 'logoSize']]) {
-        body.querySelectorAll(`[data-${attr === 'logoAlign' ? 'logo-align' : 'logo-size'}]`).forEach((btn) => btn.addEventListener('click', () => {
-          draft.config.branding[key] = btn.dataset[attr];
-          btn.parentElement.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === btn)));
-          changed();
-        }));
-      }
       body.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('click', () => {
         draft.config.branding.textSize = b.dataset.size;
         body.querySelectorAll('[data-size]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
