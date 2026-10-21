@@ -8,6 +8,7 @@ const { EventEmitter } = require('events');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
+const ExcelJS = require('exceljs');
 const EG = require('./lib/shared');
 const PH = require('./lib/ph');
 const { openDb, defaultCharts, slugify } = require('./db');
@@ -807,13 +808,126 @@ function buildCsv(ev, rows) {
 }
 const fileSlug = (ev) => ev.slug.replace(/[^a-z0-9-]/g, '');
 
-app.get('/api/admin/events/:id/registrations.csv', adminKeyLimiter, (req, res, next) => {
+// ---- Excel report: a "Registered" tab and, for events with check-in, an "Attended" tab.
+// Each tab starts with a heading (report name, event, date, venue) above the table.
+const REPORT_ADDRESS_LABELS = {
+  street: 'Unit, Floor, Building, Street', barangay: 'Barangay', city: 'City / Municipality',
+  province: 'Province', region: 'Region', zip: 'Postal Code',
+};
+async function buildWorkbook(ev, rows) {
+  const c = ev.config;
+  const F = tzFormats(c.details.timezone);
+  const local = (t) => (t ? F.stamp.format(utc(t)).replace(',', '').slice(0, 16) : '');
+  const values = rows.map(rowValues);
+  const valueOf = new Map(rows.map((r, i) => [r, values[i]]));
+  const fields = c.form.fields.filter((f) => f.enabled || values.some((v) => v[f.key]));
+  const addressFields = fields.filter((f) => f.type === 'address_ph');
+  // Answer columns. Addresses are split into their parts; the field name is only added when the form has more than one address.
+  const cols = [];
+  for (const f of fields) {
+    if (f.type === 'address_ph') {
+      for (const [k] of EG.ADDRESS_PARTS) {
+        const label = REPORT_ADDRESS_LABELS[k];
+        cols.push({ label: addressFields.length > 1 ? `${f.label}: ${label}` : label, width: k === 'street' ? 34 : k === 'zip' ? 12 : 22,
+          get: (v) => { const p = v[`${f.key}__parts`]; return p ? p[k] : k === 'street' ? v[f.key] : ''; } });
+      }
+    } else cols.push({ label: f.label, width: f.type === 'textarea' ? 40 : f.type === 'email' ? 30 : f.type === 'checkbox' || f.type === 'yesno' ? 14 : 22, get: (v) => v[f.key] });
+  }
+  const withQr = c.checkin.qr, withCheckin = c.checkin.enabled, withMail = c.email.send !== false;
+  const tz = EG.TIMEZONES.find(([z]) => z === c.details.timezone);
+  const tzNote = tz ? tz[1] : c.details.timezone;
+  const primary = (c.branding.primary || '#E00000').replace('#', 'FF');
+  const onPrimary = EG.textOn(c.branding.primary || '#E00000') === '#FFFFFF' ? 'FFFFFFFF' : 'FF141414';
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'EventGate';
+  wb.created = new Date();
+
+  function addSheet(name, title, list, extra) {
+    const columns = [
+      { label: 'No.', width: 6, get: (r, i) => i + 1 },
+      ...(withQr ? [{ label: 'Pass code', width: 12, get: (r) => pretty(r.pass_code) }] : []),
+      ...cols.map((x) => ({ ...x, get: (r) => x.get(valueOf.get(r)) || '' })),
+      ...extra,
+    ];
+    const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 7, xSplit: 0 }], pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
+    ws.columns = columns.map((col) => ({ width: col.width || 20 }));
+    const head = [
+      [title, { bold: true, size: 16 }],
+      [c.details.name, { bold: true, size: 13 }],
+      [`Date: ${c.details.date || 'Not set'}`, { size: 11 }],
+      [`Venue: ${c.details.venue || 'Not set'}`, { size: 11 }],
+      [`${list.length} ${list.length === 1 ? 'person' : 'people'} · Downloaded ${local(new Date().toISOString().replace('T', ' ').slice(0, 19))} (${tzNote} time)`, { size: 10, italic: true, color: { argb: 'FF5C5C5C' } }],
+    ];
+    head.forEach(([text, font], i) => {
+      const cell = ws.getCell(i + 1, 1);
+      cell.value = text;
+      cell.font = { name: 'Arial', ...font };
+      ws.mergeCells(i + 1, 1, i + 1, Math.max(columns.length, 6));
+      cell.alignment = { vertical: 'middle', wrapText: false };
+    });
+    ws.getRow(1).height = 24;
+    const header = ws.getRow(7);
+    columns.forEach((col, j) => {
+      const cell = header.getCell(j + 1);
+      cell.value = col.label;
+      cell.font = { name: 'Arial', bold: true, color: { argb: onPrimary } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: primary } };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FF141414' } } };
+    });
+    header.height = 30;
+    list.forEach((r, i) => {
+      const row = ws.getRow(8 + i);
+      columns.forEach((col, j) => {
+        const cell = row.getCell(j + 1);
+        const v = col.get(r, i);
+        cell.value = typeof v === 'number' ? v : String(v ?? '');
+        cell.font = { name: 'Arial', size: 10 };
+        cell.alignment = j === 0 ? { vertical: 'top', horizontal: 'center' } : { vertical: 'top', wrapText: true };
+        cell.border = { bottom: { style: 'hair', color: { argb: 'FFD4D4D4' } } };
+      });
+    });
+    if (list.length) ws.autoFilter = { from: { row: 7, column: 1 }, to: { row: 7 + list.length, column: columns.length } };
+    else { ws.getCell(8, 1).value = 'No one yet.'; ws.getCell(8, 1).font = { name: 'Arial', italic: true, color: { argb: 'FF5C5C5C' } }; }
+    ws.pageSetup.printTitlesRow = '7:7';
+    ws.headerFooter.oddFooter = `&L${c.details.name.replace(/&/g, '&&')}&RPage &P of &N`;
+  }
+
+  addSheet('Registered', 'Registration Report', rows, [
+    { label: 'Registered on', width: 17, get: (r) => local(r.created_at) },
+    ...(withMail ? [{ label: 'Confirmation emailed', width: 14, get: (r) => (r.email_sent_at ? 'Yes' : r.email ? 'No' : 'No email given') }] : []),
+    ...(withCheckin ? [{ label: 'Attended', width: 11, get: (r) => (r.checked_in_at ? 'Yes' : 'No') }] : []),
+  ]);
+  if (withCheckin) {
+    const attended = rows.filter((r) => r.checked_in_at).sort((a, b) => (a.checked_in_at < b.checked_in_at ? -1 : 1));
+    addSheet('Attended', 'Attendance Report', attended, [
+      { label: 'Registered on', width: 17, get: (r) => local(r.created_at) },
+      { label: 'Checked in at', width: 17, get: (r) => local(r.checked_in_at) },
+    ]);
+  }
+  return wb.xlsx.writeBuffer();
+}
+
+const canDownload = (req, res, next) => {
   req.auth = getAuth(req);
   if (!req.auth) return res.status(401).send('Unauthorized');
   if (req.auth.mustChange) return res.status(403).send('Choose your own password first.');
   if (!req.auth.canExport) return res.status(403).send('Downloading the attendee list is not enabled for this account.');
   next();
-}, withEvent, (req, res) => {
+};
+app.get('/api/admin/events/:id/report.xlsx', adminKeyLimiter, canDownload, withEvent, async (req, res, next) => {
+  try {
+    const buf = await buildWorkbook(req.ev, q.all.all(req.ev.id));
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${fileSlug(req.ev)}-report-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    });
+    res.send(Buffer.from(buf));
+  } catch (err) { next(err); }
+});
+
+app.get('/api/admin/events/:id/registrations.csv', adminKeyLimiter, canDownload, withEvent, (req, res) => {
   res.set({
     'Content-Type': 'text/csv; charset=utf-8',
     'Content-Disposition': `attachment; filename="${fileSlug(req.ev)}-registrations-${new Date().toISOString().slice(0, 10)}.csv"`,
