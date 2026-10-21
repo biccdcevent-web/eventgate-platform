@@ -26,6 +26,8 @@
     o[keys[keys.length - 1]] = value;
   }
   const fieldTypeLabel = (t) => EG.FIELD_TYPES[t] || t;
+  const fieldMeta = (f) => [fieldTypeLabel(f.type), f.type === 'checkbox' ? (f.required ? 'Must be ticked' : 'Optional') : f.required ? 'Required' : 'Optional',
+    f.width === 'full' ? 'Full width' : 'Half width'].join(' · ');
 
   // ------------------------------------------------------------ open / close
   async function open(e, opts = {}) {
@@ -127,7 +129,7 @@
       slug: draft.slug, status: draft.status === 'draft' ? 'open' : draft.status, full: false,
       details: { name: c.details.name, date: shownDate(), venue: c.details.venue, organizer: c.details.organizer, intro: c.details.intro },
       branding: c.branding,
-      form: { fields: c.form.fields.filter((f) => f.enabled), consent: c.form.consent, submitLabel: c.form.submitLabel, successTitle: c.form.successTitle, closedMessage: c.form.closedMessage },
+      form: { fields: c.form.fields.filter((f) => f.enabled), consent: c.form.consent, submitLabel: c.form.submitLabel, allowAnother: c.form.allowAnother, successTitle: c.form.successTitle, closedMessage: c.form.closedMessage },
       badge: c.badge,
       checkin: c.checkin,
     };
@@ -364,6 +366,8 @@
         <h3>Buttons and messages</h3>
         <div class="two">${text('config.form.submitLabel', 'Register button', { max: 60 })}${text('config.form.successTitle', 'Heading after registering', { max: 80 })}</div>
         ${text('config.form.closedMessage', 'Message when registration is closed', { max: 300 })}
+        ${check('config.form.allowAnother', 'After registering, offer a “Register another person” button')}
+        <p class="help" style="margin:-6px 0 0 30px;color:var(--muted);font-size:.82rem">Useful when one person signs up colleagues, or at a registration kiosk. Turn it off to keep it to one registration per visit.</p>
       </section>`,
 
     email: () => {
@@ -487,6 +491,8 @@
     const locked = EG.LOCKED.includes(f.key);
     const lockShown = locked || (f.key === 'email' && rules.enabledLocked);
     const lockRequired = locked || (f.key === 'email' && rules.requiredLocked);
+    // These types always take the full width on the page, so the width choice is hidden.
+    const fixedWidth = ['checkbox', 'radio', 'textarea', 'address_ph'].includes(f.type);
     const builtin = EG.BUILTIN.includes(f.key);
     const n = (all || draft.config.form.fields).length;
     const typeChoices = builtin ? (f.key === 'contact_number' ? ['phone_ph', 'phone', 'text'] : f.key === 'company_address' ? ['address_ph', 'textarea', 'text'] : [f.type]) : Object.keys(EG.FIELD_TYPES).filter((t) => t !== 'email');
@@ -497,7 +503,7 @@
           <button type="button" data-mv="-1" aria-label="Move ${esc(f.label)} up"${i === 0 ? ' disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg></button>
           <button type="button" data-mv="1" aria-label="Move ${esc(f.label)} down"${i === n - 1 ? ' disabled' : ''}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
         </div>
-        <div class="ftitle"><b data-title>${esc(f.label)}</b><span data-meta>${esc(fieldTypeLabel(f.type))} · ${f.required ? 'Required' : 'Optional'} · ${f.width === 'full' ? 'Full width' : 'Half width'}</span></div>
+        <div class="ftitle"><b data-title>${esc(f.label)}</b><span data-meta>${esc(fieldMeta(f))}</span></div>
         <div class="fctl">
           <label class="switch" title="${lockShown ? 'Always shown' : 'Show on the form'}"><input type="checkbox" data-f="enabled"${f.enabled ? ' checked' : ''}${lockShown ? ' disabled' : ''} aria-label="Show ${esc(f.label)} on the form"></label>
           <button class="btn btn-quiet btn-sm" type="button" data-f-act="edit" aria-expanded="${isOpen}">${isOpen ? 'Done' : 'Edit'}</button>
@@ -505,13 +511,15 @@
       </div>
       ${isOpen ? `<div class="fedit">
         <div class="two">
-          <div class="field"><label>Label</label><input type="text" data-f="label" value="${esc(f.label)}" maxlength="80"></div>
+          <div class="field"><label>${f.type === 'checkbox' ? 'Text beside the tick box' : f.type === 'yesno' ? 'Question' : 'Label'}</label><input type="text" data-f="label" value="${esc(f.label)}" maxlength="80"${f.type === 'checkbox' ? ' placeholder="e.g. I will attend the networking dinner"' : f.type === 'yesno' ? ' placeholder="e.g. Will you attend the networking dinner?"' : ''}></div>
           <div class="field"><label>Type</label><select data-f="type"${typeChoices.length < 2 ? ' disabled' : ''}>${typeChoices.map((t) => `<option value="${t}"${t === f.type ? ' selected' : ''}>${esc(fieldTypeLabel(t))}</option>`).join('')}</select></div>
         </div>
         <div class="two">
-          <div class="field"><label>Width</label><select data-f="width"><option value="half"${f.width !== 'full' ? ' selected' : ''}>Half width</option><option value="full"${f.width === 'full' ? ' selected' : ''}>Full width</option></select></div>
-          <div class="field"><span class="lbl">&nbsp;</span><label class="check"><input type="checkbox" data-f="required"${f.required ? ' checked' : ''}${lockRequired || !f.enabled ? ' disabled' : ''}> <span>Required</span></label></div>
+          ${fixedWidth ? '' : `<div class="field"><label>Width</label><select data-f="width"><option value="half"${f.width !== 'full' ? ' selected' : ''}>Half width</option><option value="full"${f.width === 'full' ? ' selected' : ''}>Full width</option></select></div>`}
+          <div class="field">${fixedWidth ? '' : '<span class="lbl">&nbsp;</span>'}<label class="check"><input type="checkbox" data-f="required"${f.required ? ' checked' : ''}${lockRequired || !f.enabled ? ' disabled' : ''}> <span>${f.type === 'checkbox' ? 'Must be ticked to register' : f.type === 'yesno' ? 'Required (must answer Yes or No)' : 'Required'}</span></label></div>
         </div>
+        ${f.type === 'checkbox' ? '<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">One box the registrant ticks to confirm or agree, recorded as Yes (ticked) or No. If it must be ticked, nobody can answer No, so for a real choice use the <b>Yes / No question</b> type instead.</p>' : ''}
+        ${f.type === 'yesno' ? '<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">Registrants choose Yes or No. If it isn’t required, they can leave it unanswered.</p>' : ''}
         ${f.key === 'email' ? `<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">${rules.requiredLocked ? 'Required while the event sends QR passes, because the pass is emailed to this address. To make it optional, turn off QR passes in the Check-in section.'
           : rules.enabledLocked ? 'Can be optional because this event has no QR pass. Registrants who leave it blank won’t get a confirmation email. To remove it from the form, turn off the confirmation email in the Email section.'
           : 'The event sends no confirmation email, so you can make this optional or hide it.'}</p>` : ''}
@@ -647,11 +655,12 @@
         else if (k === 'options') f.options = el.value.split('\n').map((s) => s.trim()).filter(Boolean);
         else f[k] = el.value;
         if (k === 'type' && ['select', 'radio'].includes(f.type) && !(f.options && f.options.length)) f.options = ['Option 1', 'Option 2'];
+        if (k === 'type' && ['checkbox', 'radio', 'textarea', 'address_ph'].includes(f.type)) f.width = 'full';
         const li = el.closest('[data-key]');
         if (k === 'type' || k === 'enabled') { renderFields(); }
         else {
           li.querySelector('[data-title]').textContent = f.label;
-          li.querySelector('[data-meta]').textContent = `${fieldTypeLabel(f.type)} · ${f.required ? 'Required' : 'Optional'} · ${f.width === 'full' ? 'Full width' : 'Half width'}`;
+          li.querySelector('[data-meta]').textContent = fieldMeta(f);
         }
         changed();
       };

@@ -67,6 +67,8 @@
   .err:empty { display: none; }
   .hint { color: var(--muted); font-size: .84rem; margin: .3rem 0 0; }
   .choices { display: flex; flex-direction: column; gap: .35rem; border: 1.5px solid transparent; border-radius: 10px; }
+  .field.invalid .choices { padding: .35rem .75rem; }
+  .choices.yesno { flex-direction: row; gap: 1.75rem; min-height: 48px; align-items: center; }
   .field > label.tick { font-weight: 400; font-size: .97rem; margin: 0; }
   .choice, .tick { display: flex; gap: .6rem; align-items: flex-start; font-size: .97rem; cursor: pointer; }
   .choice input, .tick input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--primary); }
@@ -182,7 +184,7 @@
       <h2 tabindex="-1" id="doneTitle">You're registered</h2>
       <p id="doneMsg"></p>
       <p id="doneHint"></p>
-      <div class="actions">
+      <div class="actions" id="doneActions">
         <a class="btn btn-primary" id="download" download>Download QR pass</a>
         <button class="btn btn-quiet" id="again" type="button">Register another person</button>
       </div>
@@ -288,8 +290,11 @@
             <div class="sub"><label for="${id}_zip">Postal code</label><select id="${id}_zip" data-part="zip" disabled><option value="">Choose a city first</option></select>
               <input id="${id}_zipText" data-part="zipText" type="text" inputmode="numeric" maxlength="4" placeholder="4-digit code" hidden aria-label="Postal code"></div>
           </div>${help}<p class="err" id="${f.key}-err"></p></fieldset>`;
+      case 'yesno':
+        return `<fieldset class="field${f.width === 'full' ? ' full' : ''}" style="border:0;padding:0;margin:0;min-width:0"><legend class="lbl" style="font-weight:700;font-size:.93rem;margin-bottom:.35rem;padding:0">${esc(f.label)}${opt}</legend>
+          <div class="choices yesno" id="${id}">${['Yes', 'No'].map((o, i) => `<label class="choice"><input type="radio" name="${f.key}" value="${o}"${i === 0 ? desc : ''}> <span>${o}</span></label>`).join('')}</div>${help}<p class="err" id="${f.key}-err"></p></fieldset>`;
       case 'checkbox':
-        return `<div class="field full"><label class="tick"><input type="checkbox" id="${id}" name="${f.key}"${desc}> <span>${esc(f.label)}${opt}</span></label>${help}<p class="err" id="${f.key}-err"></p></div>`;
+        return `<div class="field full"><label class="tick"><input type="checkbox" id="${id}" name="${f.key}"${desc}> <span>${esc(f.label)}</span></label>${help}<p class="err" id="${f.key}-err"></p></div>`;
       default: control = `<input id="${id}" name="${f.key}" type="text" maxlength="150" autocomplete="${auto}"${ph}${desc} ${req}>`;
     }
     return `<div class="field${wide}"><label for="${id}">${esc(f.label)}${opt}</label>${control}${help}<p class="err" id="${f.key}-err"></p></div>`;
@@ -578,6 +583,8 @@
     $('done').hidden = false;
     form.hidden = true;
     $('doneTitle').textContent = ev.form.successTitle;
+    // The organizer chooses whether one device may register several people in a row.
+    $('again').hidden = ev.form.allowAnother === false;
     if (!p.qr) {
       // No QR pass for this event: just confirm.
       $('download').hidden = true;

@@ -23,7 +23,7 @@
   };
   let DIMS = { ...BASE_DIMS };
   let CK = true;   // the event uses check-in
-  const CAT_TYPES = ['text', 'select', 'radio', 'checkbox', 'number'];
+  const CAT_TYPES = ['text', 'select', 'radio', 'checkbox', 'yesno', 'number'];
   function buildDims(ev) {
     const fields = (ev && ev.config && ev.config.form && ev.config.form.fields) || [];
     const on = (k) => fields.find((f) => f.key === k && f.enabled);
