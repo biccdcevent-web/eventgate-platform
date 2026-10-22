@@ -464,9 +464,16 @@
     $('evStatus').textContent = STATUS_LABEL[cur.status];
     $('evStatus').className = `chip ${cur.status}`;
     document.title = `${cur.config.details.name} · Event admin`;
-    $('evLinks').innerHTML = `<a href="/${esc(cur.slug)}" target="_blank" rel="noopener">Registration page ↗</a>` +
-      (isOwner() && checkinOn() ? `<a href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">Check-in page ↗</a>` : '') +
-      '<button type="button" class="linkish" id="shareBtn">QR code for invitations</button>';
+    // Quick actions for the event, shown as buttons under its name.
+    const I = {
+      page: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+      checkin: '<path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M8 12l3 3 5-6"/>',
+      qr: '<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2M14 18h2M18 18h2v2h-2z"/>',
+    };
+    const icon = (k) => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[k]}</svg>`;
+    $('evLinks').innerHTML = `<button type="button" class="btn btn-primary btn-sm" id="shareBtn">${icon('qr')}QR code for invitations</button>` +
+      `<a class="btn btn-quiet btn-sm" href="/${esc(cur.slug)}" target="_blank" rel="noopener">${icon('page')}Open registration page</a>` +
+      (isOwner() && checkinOn() ? `<a class="btn btn-quiet btn-sm" href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">${icon('checkin')}Open check-in page</a>` : '');
     $('shareBtn').addEventListener('click', openShare);
     $('backLink').hidden = !isOwner() && events.length <= 1;
     document.querySelectorAll('#evTabs a').forEach((a) => {

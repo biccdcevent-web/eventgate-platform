@@ -96,7 +96,10 @@
   .page-head .links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: .9rem; }
   .page-head .links a { color: var(--muted); text-underline-offset: 2px; }
   .page-head .links a:hover { color: var(--ink); }
-  .page-head .links .linkish { font-size: inherit; color: var(--muted); }
+  .page-head .links.actions-row { gap: 10px; margin-top: 12px; }
+  .page-head .links.actions-row .btn { text-decoration: none; gap: 8px; min-height: 40px; padding: .45rem .95rem; font-size: .9rem; }
+  .page-head .links.actions-row .btn-quiet { color: var(--ink); background: var(--surface); }
+  .page-head .links.actions-row .btn svg { width: 18px; height: 18px; flex: none; }
   .share-box { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: center; }
   .share-box img { width: 220px; height: 220px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
   @media (max-width: 560px) { .share-box { grid-template-columns: 1fr; justify-items: center; } }
@@ -489,7 +492,7 @@
       <div>
         <a class="back" href="#/" id="backLink">‹ All events</a>
         <h1><span id="evTitle">Event</span> <span class="chip" id="evStatus"></span></h1>
-        <div class="links" id="evLinks"></div>
+        <div class="links actions-row" id="evLinks"></div>
       </div>
       <span class="live" id="live" role="status"><span class="dot" aria-hidden="true"></span><span><b id="liveText">Live</b> <span id="updated"></span></span></span>
     </div>
