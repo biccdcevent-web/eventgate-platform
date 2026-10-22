@@ -87,6 +87,7 @@
   let me = null;
   const isOwner = () => me && me.role === 'owner';
   function showLogin(message) {
+    try { sessionStorage.removeItem('eg_signed_in_tab'); } catch {}
     closeStream();
     if ($('dlg').open) $('dlg').close();
     $('appView').hidden = true; $('pwView').hidden = true; $('loginView').hidden = false;
@@ -155,6 +156,7 @@
   });
 
   async function start(user) {
+    try { sessionStorage.setItem('eg_signed_in_tab', '1'); } catch {}
     me = user;
     if (me.mustChange) return showChangePassword(me);
     $('pwView').hidden = true;
@@ -851,7 +853,16 @@
   if (window.Analysis) window.Analysis.init({ api, base: () => (cur ? `/api/admin/events/${cur.id}` : '') });
 
   // ------------------------------------------------------------ boot
-  fetch('/api/admin/session', { credentials: 'same-origin' }).then((r) => r.json()).then((s) => {
+  // Closing the page signs you out. The browser keeps sessionStorage only while this tab is open
+  // (a refresh keeps it, closing the tab or browser clears it), so a page opened without the marker
+  // means the earlier page was closed: end that session and ask to sign in again.
+  const TAB_KEY = 'eg_signed_in_tab';
+  const tabMarked = () => { try { return sessionStorage.getItem(TAB_KEY) === '1'; } catch { return true; } };
+  fetch('/api/admin/session', { credentials: 'same-origin' }).then((r) => r.json()).then(async (s) => {
+    if (s.signedIn && !tabMarked()) {
+      await fetch('/api/admin/logout', { method: 'POST' }).catch(() => {});
+      return showLogin();
+    }
     if (s.signedIn) start(s.user); else showLogin();
   }).catch(() => showLogin());
 })();
