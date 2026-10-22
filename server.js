@@ -759,6 +759,21 @@ function computeStats(ev) {
 const ev$ = [requireSignedIn, withEvent];
 const evOwner$ = [requireOwner, withEvent];
 
+// QR code of the event's registration page, for organizers to put on invitations and posters.
+// PNG (large, for documents and chat) or SVG (sharp at any size, for print).
+app.get('/api/admin/events/:id/share-qr.:fmt', ...ev$, async (req, res, next) => {
+  try {
+    const url = `${req.protocol}://${req.get('host')}/${req.ev.slug}`;
+    const opts = { margin: 4, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#FFFFFF' } };
+    const name = `${fileSlug(req.ev)}-registration-qr`;
+    if (req.query.dl) res.set('Content-Disposition', `attachment; filename="${name}.${req.params.fmt}"`);
+    res.set('Cache-Control', 'no-store');
+    if (req.params.fmt === 'svg') return res.type('image/svg+xml').send(await QRCode.toString(url, { ...opts, type: 'svg' }));
+    if (req.params.fmt === 'png') return res.type('image/png').send(await QRCode.toBuffer(url, { ...opts, type: 'png', width: 1200 }));
+    res.status(404).end();
+  } catch (err) { next(err); }
+});
+
 app.get('/api/admin/events/:id/stats', ...ev$, (req, res) => res.json(computeStats(req.ev)));
 
 app.get('/api/admin/events/:id/attendees', ...ev$, (req, res) => {
