@@ -31,6 +31,8 @@ One system for many events. Each event gets its own registration page at `yourdo
 
 **Backup & reset** for each event: reset check-ins after a rehearsal, delete all records, back up on demand, download or restore any backup, and archive or delete the event. A backup is always made first.
 
+**Signing out**: closing the admin page (the tab or the whole browser) signs the user out; refreshing the page does not. Sessions also end after 12 hours.
+
 **Users**: client accounts that can only view the dashboards of the events you assign them, with or without the Excel download.
 
 ## Running it

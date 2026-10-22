@@ -381,7 +381,9 @@ function setSession(req, res, uid, ver) {
   const secure = req.secure ? '; Secure' : '';
   if (uid === null) return res.set('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`);
   const exp = Date.now() + SESSION_MS;
-  res.set('Set-Cookie', `${SESSION_COOKIE}=${uid}.${ver}.${exp}.${sessionSig(uid, ver, exp)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MS / 1000}${secure}`);
+  // No Max-Age: the browser drops the cookie when it closes. The admin page also signs out when its tab
+  // is closed (see admin.js). The 12-hour limit inside the cookie still applies.
+  res.set('Set-Cookie', `${SESSION_COOKIE}=${uid}.${ver}.${exp}.${sessionSig(uid, ver, exp)}; Path=/; HttpOnly; SameSite=Strict${secure}`);
 }
 
 // A client still using the temporary password from the administrator must choose their own before anything else.
