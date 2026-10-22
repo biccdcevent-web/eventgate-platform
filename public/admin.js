@@ -383,13 +383,91 @@
     tz = cur.config.details.timezone || tz;
     return cur;
   }
+  // ------------------------------------------------------------ share the registration page
+  // The QR code points to the event's registration page, for invitations, posters and chat messages.
+  function openShare() {
+    const url = `${location.origin}/${cur.slug}`;
+    const base = `/api/admin/events/${cur.id}/share-qr`;
+    const note = cur.status === 'draft' ? '<p class="notice warn" style="margin:0 0 12px">This event is still a <b>Draft</b>, so the page is hidden. Set it to Open in Settings before sharing.</p>'
+      : cur.status !== 'open' ? `<p class="notice warn" style="margin:0 0 12px">Registration is <b>${esc(STATUS_LABEL[cur.status])}</b>. People who scan it will see the closed message.</p>` : '';
+    openDialog({
+      title: 'QR code for invitations',
+      wide: true,
+      body: `${note}<div class="share-box">
+          <img src="${base}.svg" alt="QR code for ${esc(url)}" width="220" height="220">
+          <div class="stack" style="gap:10px;min-width:0">
+            <p style="margin:0">Scanning it opens the registration page:</p>
+            <div class="pw-row"><input id="shareUrl" type="text" readonly value="${esc(url)}" style="flex:1;min-width:0;font:inherit;color:var(--ink);background:var(--surface-2);border:1.5px solid var(--line);border-radius:10px;padding:.55rem .7rem;min-height:44px"><button class="btn btn-quiet" type="button" id="shareCopy">Copy link</button></div>
+            <div class="actions" style="flex-wrap:wrap">
+              <a class="btn btn-primary btn-sm" href="${base}.png?dl=1" download>Download PNG</a>
+              <a class="btn btn-quiet btn-sm" href="${base}.svg?dl=1" download>Download SVG (for print)</a>
+              <button class="btn btn-quiet btn-sm" type="button" id="shareCard">Download with event name</button>
+            </div>
+            <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">PNG for invitations, emails and chat. SVG stays sharp at any size, for posters and tarpaulins. Print it at least 2.5 cm (1 in) wide, and test it with a phone before printing many.</p>
+          </div>
+        </div>`,
+      afterOpen() {
+        $('shareCopy').addEventListener('click', async () => {
+          const input = $('shareUrl');
+          try { await navigator.clipboard.writeText(input.value); } catch { input.select(); document.execCommand('copy'); }
+          $('shareCopy').textContent = 'Copied';
+          setTimeout(() => { if ($('shareCopy')) $('shareCopy').textContent = 'Copy link'; }, 1600);
+        });
+        $('shareCard').addEventListener('click', () => downloadShareCard(url, `${base}.png`).catch(() => { $('dlgErr').textContent = 'The image could not be made. Try Download PNG instead.'; }));
+      },
+    });
+  }
+  // A ready-to-use image: "Scan to register", the event name, date, the QR code and the web address.
+  async function downloadShareCard(url, pngUrl) {
+    const d = cur.config.details;
+    const img = new Image();
+    img.src = pngUrl;
+    await img.decode();
+    await document.fonts.ready;
+    const W = 1200, pad = 90, qr = 820;
+    const cv = document.createElement('canvas');
+    const ctx = cv.getContext('2d');
+    const font = (w, s) => `${w} ${s}px Roboto, Arial, sans-serif`;
+    // wrap the event name over up to three lines
+    const wrap = (text, max, f) => {
+      ctx.font = f;
+      const words = String(text).split(/\s+/), lines = [];
+      let line = '';
+      for (const w of words) { const t = line ? `${line} ${w}` : w; if (ctx.measureText(t).width > max && line) { lines.push(line); line = w; } else line = t; }
+      if (line) lines.push(line);
+      return lines.slice(0, 3);
+    };
+    const nameLines = wrap(d.name, W - pad * 2, font(700, 58));
+    const H = pad + 50 + 30 + nameLines.length * 70 + (d.date ? 58 : 0) + 30 + qr + 40 + 50 + pad;
+    cv.width = W; cv.height = H;
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = cur.config.branding.primary || '#E00000'; ctx.fillRect(0, 0, W, 16);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    let y = pad + 40;
+    ctx.fillStyle = '#5C5C5C'; ctx.font = font(700, 36); ctx.fillText('SCAN TO REGISTER', W / 2, y);
+    y += 30;
+    ctx.fillStyle = '#141414'; ctx.font = font(700, 58);
+    for (const l of nameLines) { y += 70; ctx.fillText(l, W / 2, y); }
+    if (d.date) { y += 58; ctx.fillStyle = '#5C5C5C'; ctx.font = font(400, 34); ctx.fillText(d.date, W / 2, y); }
+    y += 30;
+    ctx.drawImage(img, (W - qr) / 2, y, qr, qr);
+    y += qr + 40;
+    ctx.fillStyle = '#141414'; ctx.font = font(700, 40); ctx.fillText(url.replace(/^https?:\/\//, ''), W / 2, y + 10);
+    const a = document.createElement('a');
+    a.download = `${cur.slug}-registration-qr-card.png`;
+    a.href = cv.toDataURL('image/png');
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
   function renderEventHead() {
     $('evTitle').textContent = cur.config.details.name;
     $('evStatus').textContent = STATUS_LABEL[cur.status];
     $('evStatus').className = `chip ${cur.status}`;
     document.title = `${cur.config.details.name} · Event admin`;
     $('evLinks').innerHTML = `<a href="/${esc(cur.slug)}" target="_blank" rel="noopener">Registration page ↗</a>` +
-      (isOwner() && checkinOn() ? `<a href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">Check-in page ↗</a>` : '');
+      (isOwner() && checkinOn() ? `<a href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">Check-in page ↗</a>` : '') +
+      '<button type="button" class="linkish" id="shareBtn">QR code for invitations</button>';
+    $('shareBtn').addEventListener('click', openShare);
     $('backLink').hidden = !isOwner() && events.length <= 1;
     document.querySelectorAll('#evTabs a').forEach((a) => {
       a.href = `#/e/${cur.id}${a.dataset.tab === 'dash' ? '' : `/${a.dataset.tab}`}`;

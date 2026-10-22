@@ -96,6 +96,10 @@
   .page-head .links { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; font-size: .9rem; }
   .page-head .links a { color: var(--muted); text-underline-offset: 2px; }
   .page-head .links a:hover { color: var(--ink); }
+  .page-head .links .linkish { font-size: inherit; color: var(--muted); }
+  .share-box { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; align-items: center; }
+  .share-box img { width: 220px; height: 220px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+  @media (max-width: 560px) { .share-box { grid-template-columns: 1fr; justify-items: center; } }
   .back { display: inline-flex; align-items: center; gap: .3rem; color: var(--muted); text-decoration: none; font-weight: 600; font-size: .9rem; }
   .back:hover { color: var(--ink); }
   .live { display: inline-flex; align-items: center; gap: .5rem; font-size: .88rem; color: var(--muted); }
