@@ -9,10 +9,11 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
 const ExcelJS = require('exceljs');
+const sharp = require('sharp');
 const EG = require('./lib/shared');
 const PH = require('./lib/ph');
 const { openDb, defaultCharts, slugify } = require('./db');
-const { sendPassEmail, renderPassEmail, senderAddress } = require('./mailer');
+const { sendPassEmail, renderPassEmail, senderAddress, imageSize } = require('./mailer');
 
 const PORT = Number(process.env.PORT) || 3000;
 const PASS_SECRET = process.env.PASS_SECRET;
@@ -53,10 +54,26 @@ const getSetting = (k) => (db.prepare('SELECT value FROM settings WHERE key = ?'
 const setSetting = (k, v) => db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(k, v);
 
 const STATUSES = ['draft', 'open', 'closed', 'archived'];
+// Pixel sizes of uploaded images (read once from the file), so pages can size two logos evenly.
+const dimsCache = new Map();
+function fileDims(src) {
+  if (!src) return null;
+  if (!dimsCache.has(src)) {
+    const d = imageSize(path.join(uploadsDir, path.basename(src)));
+    dimsCache.set(src, d && d.w && d.h ? { w: d.w, h: d.h } : null);
+  }
+  return dimsCache.get(src);
+}
+function withImageDims(config) {
+  const b = config.branding;
+  b.logoDims = fileDims(b.logo);
+  b.logo2Dims = fileDims(b.logo2);
+  return config;
+}
 function loadEvent(row) {
   if (!row) return null;
   let config;
-  try { config = EG.sanitizeConfig(JSON.parse(row.config)); } catch { config = EG.defaultConfig(); }
+  try { config = withImageDims(EG.sanitizeConfig(JSON.parse(row.config))); } catch { config = EG.defaultConfig(); }
   return { id: row.id, slug: row.slug, status: row.status, staffPin: row.staff_pin, config, createdAt: row.created_at };
 }
 const eventById = (id) => loadEvent(evQ.byId.get(Number(id)));
@@ -581,6 +598,7 @@ app.post('/api/admin/events', requireOwner, (req, res) => {
     config = JSON.parse(JSON.stringify(src.config));
     config.details = { ...config.details, name, date: '', venue: '', capacity: null };
     config.branding.logo = copyLogo(config.branding.logo);
+    config.branding.logo2 = copyLogo(config.branding.logo2);
   } else {
     config = EG.defaultConfig({ name });
   }
@@ -604,7 +622,9 @@ app.put('/api/admin/events/:id', requireOwner, withEvent, (req, res) => {
   let config = ev.config;
   if (b.config !== undefined) {
     config = EG.sanitizeConfig(b.config, ev.config);
-    if (config.branding.logo && !fs.existsSync(path.join(uploadsDir, path.basename(config.branding.logo)))) config.branding.logo = ev.config.branding.logo;
+    for (const k of ['logo', 'logo2']) {
+      if (config.branding[k] && !fs.existsSync(path.join(uploadsDir, path.basename(config.branding[k])))) config.branding[k] = ev.config.branding[k];
+    }
   }
   evQ.update.run({ id: ev.id, slug, status, staff_pin: pin, config: JSON.stringify(config) });
   if (slug !== ev.slug && getSetting('home_event') === ev.slug) setSetting('home_event', slug);
@@ -626,16 +646,44 @@ app.delete('/api/admin/events/:id', requireOwner, withEvent, (req, res) => {
   res.json({ ok: true });
 });
 
-// Logo upload: PNG or JPEG up to 2 MB. Saved under a random name; the event uses it once settings are saved.
-app.post('/api/admin/events/:id/logo', requireOwner, withEvent, express.raw({ type: ['image/png', 'image/jpeg'], limit: '2mb' }), (req, res) => {
+// Image upload (the event logo or the second image): PNG or JPEG up to 5 MB. Saved under a random name;
+// the event uses it once settings are saved. Each image is optimized on the way in:
+// - turned upright if the camera recorded it sideways
+// - blank white or transparent margins are trimmed, so logos of different files line up and size evenly
+// - scaled down (never up) to at most 1000 px on the longer side, keeping its proportions
+// - compressed (PNG keeps transparency; JPEG photos stay JPEG)
+async function optimizeImage(buf, png) {
+  let img = sharp(buf, { failOn: 'none' }).rotate();
+  // trim only when the corner is white or transparent, so a logo printed on a coloured box keeps its box
+  const { data, info } = await sharp(buf, { failOn: 'none' }).rotate().ensureAlpha().extract({ left: 0, top: 0, width: 1, height: 1 }).raw().toBuffer({ resolveWithObject: true });
+  const [r, g, bl, a] = data;
+  if (info.channels === 4 && (a < 16 || (r > 235 && g > 235 && bl > 235))) {
+    try {
+      const trimmed = await sharp(await img.toBuffer()).trim({ threshold: 18 }).toBuffer();
+      img = sharp(trimmed);
+    } catch { img = sharp(buf, { failOn: 'none' }).rotate(); } // a blank image has nothing to trim
+  }
+  img = img.resize({ width: 1000, height: 1000, fit: 'inside', withoutEnlargement: true });
+  const out = png ? await img.png({ compressionLevel: 9, adaptiveFiltering: true, palette: true, quality: 95, effort: 8 }).toBuffer()
+    : await img.jpeg({ quality: 86, mozjpeg: true }).toBuffer();
+  const meta = await sharp(out).metadata();
+  return { out, dims: { w: meta.width, h: meta.height } };
+}
+app.post('/api/admin/events/:id/logo', requireOwner, withEvent, express.raw({ type: ['image/png', 'image/jpeg'], limit: '5mb' }), async (req, res) => {
   const buf = req.body;
-  if (!Buffer.isBuffer(buf) || !buf.length) return res.status(422).json({ message: 'Choose a PNG or JPG image up to 2 MB.' });
+  if (!Buffer.isBuffer(buf) || !buf.length) return res.status(422).json({ message: 'Choose a PNG or JPG image up to 5 MB.' });
   const png = buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   const jpg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
   if (!png && !jpg) return res.status(422).json({ message: 'That file isn’t a PNG or JPG image.' });
+  let result;
+  try { result = await optimizeImage(buf, png); } catch (err) {
+    console.error('[image]', err.message);
+    return res.status(422).json({ message: 'That image could not be read. Try saving it again as PNG or JPG.' });
+  }
   const name = `logo-${crypto.randomBytes(8).toString('hex')}.${png ? 'png' : 'jpg'}`;
-  fs.writeFileSync(path.join(uploadsDir, name), buf);
-  res.status(201).json({ logo: `/uploads/${name}` });
+  fs.writeFileSync(path.join(uploadsDir, name), result.out);
+  dimsCache.set(`/uploads/${name}`, result.dims);
+  res.status(201).json({ logo: `/uploads/${name}`, dims: result.dims, bytes: result.out.length, originalBytes: buf.length });
 });
 
 // Email preview and test send use the settings being edited (not yet saved).
@@ -645,7 +693,7 @@ function sampleValues(config) {
   for (const f of config.form.fields) if (!v[f.key]) v[f.key] = f.options ? f.options[0] : sample[f.type] || 'Sample';
   return v;
 }
-const previewEvent = (ev, body) => ({ ...ev, config: body && body.config ? EG.sanitizeConfig(body.config, ev.config) : ev.config });
+const previewEvent = (ev, body) => ({ ...ev, config: body && body.config ? withImageDims(EG.sanitizeConfig(body.config, ev.config)) : ev.config });
 
 app.post('/api/admin/events/:id/email-preview', requireOwner, withEvent, async (req, res) => {
   const ev = previewEvent(req.ev, req.body);
@@ -654,7 +702,8 @@ app.post('/api/admin/events/:id/email-preview', requireOwner, withEvent, async (
   const html = msg.html
     .replace('cid:passqr', `data:image/png;base64,${qr}`)
     .replace('cid:jupiterlogo', '/jupiter-logo.png')
-    .replace('cid:eventlogo', ev.config.branding.logo || '');
+    .replace(/cid:eventlogo2\b/g, ev.config.branding.logo2 || '')
+    .replace(/cid:eventlogo\b/g, ev.config.branding.logo || '');
   res.json({ subject: msg.subject, html });
 });
 

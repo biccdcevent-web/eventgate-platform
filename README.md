@@ -25,6 +25,8 @@ One system for many events. Each event gets its own registration page at `yourdo
 - **Email**: sender name, reply-to address, subject, message with registrant details like `{first_name}`, the details listed under the QR code, footer note, and a test send.
 - **Name tag**: the two lines under the attendee's name, event name and logo.
 
+**Images**: each event can have up to 2 images (for example the event logo and a partner's logo). Uploads are trimmed of blank margins, resized and compressed automatically. For the registration page, the email and the name tag separately, each image can be shown at the top (above, left or right of the event name), at the bottom, or not at all, in a small, medium or large size; two images are sized to look balanced.
+
 **QR code for invitations**: each event's page has a "QR code for invitations" link that opens the registration page's QR code, with the link to copy and downloads as PNG, SVG (for print) or a ready-made image with the event name and date.
 
 **Dashboard** for each event: live check-ins and attendance, registrations per day, arrivals every 15 minutes, top companies, latest activity, an attendee list (select a person to see all their answers), Excel download, and an Analysis section for your own charts, including charts of custom fields.

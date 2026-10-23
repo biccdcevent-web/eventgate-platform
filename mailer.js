@@ -86,31 +86,50 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
   const withQr = EG.emailMode(c) === 'qr';   // no QR code or pass code when the event doesn't use them
   const font = `font-family:${EG.fontStack(b.bodyFont).replace(/"/g, "'")};`;
   const hfont = `font-family:${EG.fontStack(b.headingFont).replace(/"/g, "'")};`;
-  const logoPath = b.logoInEmail && b.logo ? path.join(uploadsDir, path.basename(b.logo)) : null;
-  const hasLogo = Boolean(logoPath && fs.existsSync(logoPath));
-  const [logoW, logoH] = (EG.LOGO_SIZES[b.emailLogoSize] || EG.LOGO_SIZES.medium).email;
-  const logo = hasLogo ? fitBox(imageSize(logoPath), logoW, logoH) : null;
+  // Images (event logo and an optional second image), each at the top, at the bottom, or not shown.
+  const [boxW, boxH] = (EG.LOGO_SIZES[b.emailLogoSize] || EG.LOGO_SIZES.medium).email;
+  const fileOf = (im) => path.join(uploadsDir, path.basename(im.src));
+  const placed = EG.placedImages(b, 'email');
+  const usable = (list) => list.filter((im) => fs.existsSync(fileOf(im))).map((im) => ({ ...im, file: fileOf(im), cid: im.n === 1 ? 'eventlogo' : 'eventlogo2', natural: imageSize(fileOf(im)) }));
+  const topImgs = usable(placed.top), bottomImgs = usable(placed.bottom);
   const logoAlign = EG.LOGO_ALIGNS.includes(b.emailLogoAlign) ? b.emailLogoAlign : 'left';
-  const logoMargin = { left: '0', center: '0 auto', right: '0 0 0 auto' }[logoAlign];
-  const logoPlace = EG.LOGO_PLACES.includes(b.emailLogoPlace) ? b.emailLogoPlace : 'above';
+  const logoPlace = topImgs.length && EG.LOGO_PLACES.includes(b.emailLogoPlace) ? b.emailLogoPlace : 'above';
+  // Exact pixel sizes (Outlook ignores max-width): two images share the space and get balanced sizes.
+  const sizeOf = (im, share) => {
+    const bs = EG.balancedSize(im.natural, boxW * share, boxH);
+    let d = bs ? { w: bs.w, h: bs.h } : fitBox(im.natural, boxW * share, boxH);
+    if (im.natural && d.w > im.natural.w) d = { w: im.natural.w, h: im.natural.h }; // never enlarge
+    return { w: Math.round(d.w), h: Math.round(d.h) };
+  };
+  const imgTag = (im, d, margin = '0') => `<img src="cid:${im.cid}" width="${d.w}" height="${d.h}" alt="${im.n === 1 ? esc(c.details.organizer || c.details.name) : ''}" style="display:block;width:${d.w}px;height:${d.h}px;max-width:100%;border:0;outline:none;margin:${margin}">`;
+  // One image, or two side by side with a 20px gap. Returns the HTML and its total width.
+  const group = (list, share, align) => {
+    if (!list.length) return { html: '', w: 0 };
+    if (list.length === 1) { const d = sizeOf(list[0], 1); return { html: imgTag(list[0], d, align ? { left: '0', center: '0 auto', right: '0 0 0 auto' }[align] : '0'), w: d.w }; }
+    const ds = list.map((im) => sizeOf(im, share));
+    const cells = list.map((im, i) => `<td valign="middle"${i ? ' style="padding-left:20px"' : ''}>${imgTag(im, ds[i])}</td>`).join('');
+    const tAlign = align && align !== 'left' ? ` align="${align}"` : '';
+    return { html: `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${tAlign} style="${align === 'center' ? 'margin:0 auto' : align === 'right' ? 'margin:0 0 0 auto' : ''}"><tr>${cells}</tr></table>`, w: ds[0].w + ds[1].w + 20 };
+  };
   const fields = new Map(c.form.fields.map((f) => [f.key, f]));
   const bg = b.background;
   const ink = '#141414', muted = '#5C5C5C';
 
-  // Event name, date and venue, with the logo above them or beside them.
-  const logoImg = logo ? `<img src="cid:eventlogo" width="${logo.w}" height="${logo.h}" alt="${esc(c.details.organizer || c.details.name)}" style="display:block;width:${logo.w}px;height:${logo.h}px;max-width:100%;border:0;outline:none;margin:${logoPlace === 'above' ? logoMargin : '0'}">` : '';
+  // Event name, date and venue, with the top images above them or beside them.
+  const topGroup = group(topImgs, logoPlace === 'above' ? 0.8 : 0.6, logoPlace === 'above' ? logoAlign : null);
+  const bottomGroup = group(bottomImgs, 0.8, 'center');
   const titleBlock = `<h1 style="${hfont}margin:0;font-size:24px;line-height:31px;font-weight:bold;color:${ink}">${esc(c.details.name)}</h1>
     ${c.details.date ? `<p style="${font}margin:8px 0 0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.date)}</p>` : ''}
     ${c.details.venue ? `<p style="${font}margin:0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.venue)}</p>` : ''}`;
   let header;
-  if (logo && logoPlace !== 'above') {
-    const logoCell = `<td class="eg-side eg-side-logo" width="${logo.w}" valign="middle" style="width:${logo.w}px;padding:0 ${logoPlace === 'left' ? 20 : 0}px 0 ${logoPlace === 'right' ? 20 : 0}px">${logoImg}</td>`;
+  if (topImgs.length && logoPlace !== 'above') {
+    const logoCell = `<td class="eg-side eg-side-logo" width="${topGroup.w}" valign="middle" style="width:${topGroup.w}px;padding:0 ${logoPlace === 'left' ? 20 : 0}px 0 ${logoPlace === 'right' ? 20 : 0}px">${topGroup.html}</td>`;
     const textCell = `<td class="eg-side" dir="ltr" valign="middle" style="text-align:left">${titleBlock}</td>`;
     // On phones the two cells stack, logo first. For "right of the name" the table runs right-to-left,
     // so the logo cell still comes first in the code (and on top when stacked) but shows on the right.
     header = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${logoPlace === 'right' ? ' dir="rtl"' : ''}><tr>${logoCell}${textCell}</tr></table>`;
   } else {
-    header = `${logo ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${logoAlign}" style="padding:0 0 20px">${logoImg}</td></tr></table>` : ''}
+    header = `${topImgs.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${logoAlign}" style="padding:0 0 20px">${topGroup.html}</td></tr></table>` : ''}
     ${titleBlock}`;
   }
 
@@ -180,15 +199,18 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
     <p style="margin:0;font-family:'Courier New',Courier,monospace;font-size:22px;line-height:28px;font-weight:bold;letter-spacing:3px;color:${ink}">${esc(passCode)}</p>
     <p style="${font}margin:4px 0 0;font-size:13px;line-height:18px;color:${muted}">Pass code</p>
   </td></tr>` : ''}
-  <tr><td class="eg-pad" style="padding:8px 40px ${footer ? '8px' : '36px'}">
+  <tr><td class="eg-pad" style="padding:8px 40px ${footer ? '8px' : bottomImgs.length ? '20px' : '36px'}">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E6E6E6">${summary.join('')}</table>
   </td></tr>
-  ${footer ? `<tr><td class="eg-pad" style="padding:20px 40px 36px">${footer}</td></tr>` : ''}
+  ${footer ? `<tr><td class="eg-pad" style="padding:20px 40px ${bottomImgs.length ? '20px' : '36px'}">${footer}</td></tr>` : ''}
+  ${bottomImgs.length ? `<tr><td class="eg-pad" align="center" style="padding:0 40px 32px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E6E6E6"><tr><td align="center" style="padding:24px 0 0">${bottomGroup.html}</td></tr></table>
+  </td></tr>` : ''}
 </table>
 <!--[if mso]></td></tr></table><![endif]-->
 <table role="presentation" width="600" class="eg-card" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px">
   <tr><td align="center" style="padding:18px 20px 0">
-    <p style="${font}margin:0;font-size:12px;line-height:18px;color:${muted}">Sent by ${esc(vars.organizer)} because you registered for ${esc(c.details.name)}.</p>
+    <p style="${font}margin:0;font-size:12px;line-height:18px;color:${muted}">Sent by ${esc(vars.organizer)} because you registered for ${esc(/^the\s/i.test(c.details.name) ? c.details.name : `the ${c.details.name}`)}.</p>
   </td></tr>
   <tr><td align="center" style="padding:10px 0 0">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>
@@ -221,7 +243,8 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
     'Powered by Jupiter Systems, Inc.',
   ].filter((l) => l !== null).join('\n');
 
-  return { subject, html, text, logoPath: hasLogo ? logoPath : null, withQr };
+  const images = [...topImgs, ...bottomImgs].map((im) => ({ path: im.file, cid: im.cid }));
+  return { subject, html, text, images, withQr };
 }
 
 async function sendPassEmail({ event, values, passCode, qrPng, uploadsDir, to }) {
@@ -231,7 +254,7 @@ async function sendPassEmail({ event, values, passCode, qrPng, uploadsDir, to })
     ...(msg.withQr ? [{ filename: `pass-${passCode}.png`, content: qrPng, contentType: 'image/png', cid: 'passqr' }] : []),
     { filename: 'jupiter-systems.png', path: path.join(__dirname, 'jupiter-logo-email.png'), contentType: 'image/png', cid: 'jupiterlogo' },
   ];
-  if (msg.logoPath) attachments.push({ filename: `logo${path.extname(msg.logoPath)}`, path: msg.logoPath, cid: 'eventlogo' });
+  for (const im of msg.images) attachments.push({ filename: `${im.cid}${path.extname(im.path)}`, path: im.path, cid: im.cid });
   const info = await getTransport().sendMail({
     from: { name: c.email.fromName || c.details.name, address: senderAddress() },
     replyTo: c.email.replyTo || undefined,
@@ -252,4 +275,4 @@ async function sendPassEmail({ event, values, passCode, qrPng, uploadsDir, to })
   return info;
 }
 
-module.exports = { sendPassEmail, renderPassEmail, senderAddress };
+module.exports = { sendPassEmail, renderPassEmail, senderAddress, imageSize };
