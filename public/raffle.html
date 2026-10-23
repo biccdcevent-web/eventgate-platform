@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Raffle draw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link id="fontLink" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;900&display=swap">
+<style>
+  /* Projector screen for the raffle: dark, high contrast, the event's main colour for highlights. */
+  :root {
+    --bg: #0E0F12; --panel: #17191F; --line: #2A2D36; --ink: #F5F5F5; --muted: #A3A7B3;
+    --primary: #E00000; --on-primary: #FFFFFF;
+    --display: "Roboto", "Helvetica Neue", Arial, sans-serif; --body: "Roboto", "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.45 var(--body); -webkit-font-smoothing: antialiased; overflow: hidden; }
+  button { font: inherit; }
+  :focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 48px; padding: .7rem 1.3rem; border-radius: 12px; border: 1.5px solid var(--line); background: transparent; color: var(--ink); font-weight: 700; cursor: pointer; }
+  .btn:hover { border-color: var(--muted); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+
+  /* PIN */
+  .center { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+  .pin-card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 28px; }
+  .pin-card h1 { font: 700 1.5rem/1.2 var(--display); margin: 0 0 4px; }
+  .pin-card p { color: var(--muted); margin: 0 0 18px; }
+  .pin-card label { display: block; font-weight: 700; margin-bottom: 6px; }
+  .pin-card input { width: 100%; font: 700 1.4rem/1 var(--body); letter-spacing: .2em; color: var(--ink); background: var(--bg); border: 1.5px solid var(--line); border-radius: 12px; padding: .8rem 1rem; margin-bottom: 14px; }
+  .err { color: #FF8A80; min-height: 1.4em; margin: 10px 0 0; }
+
+  /* Stage */
+  .stage { height: 100%; display: grid; grid-template-rows: auto 1fr auto; }
+  header { display: flex; align-items: center; gap: 18px; padding: 18px 28px; border-bottom: 1px solid var(--line); }
+  header .logos { display: flex; gap: 14px; align-items: center; }
+  header .logos img { height: 44px; width: auto; max-width: 180px; object-fit: contain; background: #fff; border-radius: 8px; padding: 4px 8px; }
+  header .title { flex: 1; min-width: 0; }
+  header .title b { display: block; font: 700 1.25rem/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .title span { color: var(--muted); font-size: .95rem; }
+  .main { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; min-height: 0; }
+  .side { border-right: 1px solid var(--line); padding: 18px; overflow: auto; }
+  .side:last-child { border-right: 0; border-left: 1px solid var(--line); }
+  .side h2 { font: 700 .8rem/1 var(--body); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 4px 0 14px; }
+  .prize { width: 100%; text-align: left; display: block; padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; margin-bottom: 10px; }
+  .prize b { display: block; font-size: 1rem; line-height: 1.3; }
+  .prize span { color: var(--muted); font-size: .85rem; }
+  .prize[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+  .prize.done { opacity: .55; }
+  .draw { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 32px; min-width: 0; position: relative; }
+  .kicker { font: 700 .9rem/1 var(--body); letter-spacing: .14em; text-transform: uppercase; color: var(--primary); margin: 0 0 10px; filter: brightness(1.4); }
+  .prize-name { font: 900 clamp(1.8rem, 3.6vw, 3.2rem)/1.08 var(--display); margin: 0; max-width: 100%; overflow-wrap: break-word; }
+  .left { color: var(--muted); margin: 10px 0 0; font-size: 1.1rem; }
+  .reel { margin: clamp(24px, 5vh, 56px) 0; width: 100%; min-height: 2.6em; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .reel .nm { font: 900 clamp(2.6rem, 6.4vw, 6rem)/1.05 var(--display); letter-spacing: -.02em; max-width: 100%; overflow-wrap: break-word; transition: transform .25s, color .25s; }
+  .reel .dt { color: var(--muted); font-size: clamp(1.1rem, 1.9vw, 1.7rem); margin-top: 10px; min-height: 1.4em; }
+  .reel.spinning .nm { color: var(--muted); }
+  .reel.won .nm { color: var(--ink); animation: pop .5s ease-out; text-shadow: 0 0 28px color-mix(in srgb, var(--primary) 70%, transparent); }
+  @keyframes pop { 0% { transform: scale(.85); } 60% { transform: scale(1.07); } 100% { transform: scale(1); } }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .big { min-height: 64px; padding: 1rem 2.2rem; font-size: 1.3rem; border-radius: 16px; }
+  .msg { color: var(--muted); margin: 16px 0 0; min-height: 1.4em; }
+  ol.winners { list-style: none; margin: 0; padding: 0; counter-reset: w; }
+  ol.winners li { padding: 10px 0; border-bottom: 1px solid var(--line); counter-increment: w; display: grid; grid-template-columns: 30px 1fr; gap: 4px 6px; }
+  ol.winners li::before { content: counter(w); color: var(--muted); font-weight: 700; }
+  ol.winners li b { display: block; }
+  ol.winners li span { color: var(--muted); font-size: .88rem; grid-column: 2; }
+  ol.winners li.claimed b::after { content: '  ✓ claimed'; color: #7BD88F; font-size: .8rem; font-weight: 700; }
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+  footer img { height: 18px; vertical-align: middle; opacity: .8; }
+  .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .confetti i { position: absolute; top: -20px; width: 10px; height: 16px; border-radius: 2px; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+  @media (max-width: 1000px) { body { overflow: auto; } .main { grid-template-columns: 1fr; } .side { border: 0; border-bottom: 1px solid var(--line); } .side:last-child { border: 0; } }
+  @media (prefers-reduced-motion: reduce) { .reel.won .nm { animation: none; } .confetti { display: none; } }
+</style>
+</head>
+<body>
+<div class="center" id="pinView" hidden>
+  <form class="pin-card" id="pinForm" novalidate>
+    <h1 id="pinTitle">Raffle draw</h1>
+    <p>Enter the raffle PIN from the event’s Raffle tab, or sign in to the admin first.</p>
+    <label for="pin">Raffle PIN</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12">
+    <button class="btn btn-primary" type="submit" style="width:100%">Open the draw</button>
+    <p class="err" id="pinErr" role="alert"></p>
+  </form>
+</div>
+
+<div class="center" id="msgView" hidden><div class="pin-card"><h1 id="msgTitle">Raffle</h1><p id="msgText"></p></div></div>
+
+<div class="stage" id="stage" hidden>
+  <header>
+    <div class="logos" id="logos"></div>
+    <div class="title"><b id="evName"></b><span id="evDate"></span></div>
+    <button class="btn" type="button" id="fsBtn" title="Full screen (F)">Full screen</button>
+  </header>
+  <div class="main">
+    <aside class="side" aria-label="Prizes"><h2>Prizes</h2><div id="prizeList"></div></aside>
+    <section class="draw" aria-live="polite">
+      <p class="kicker" id="kicker">Now drawing</p>
+      <h1 class="prize-name" id="prizeName"></h1>
+      <p class="left" id="prizeLeft"></p>
+      <div class="reel" id="reel"><div class="nm" id="reelName">Ready</div><div class="dt" id="reelDetail"></div></div>
+      <div class="actions">
+        <button class="btn btn-primary big" type="button" id="drawBtn">Draw a winner</button>
+        <button class="btn big" type="button" id="noshowBtn" hidden>Not here? Redraw</button>
+        <button class="btn big" type="button" id="claimBtn" hidden>Prize claimed</button>
+        <button class="btn big" type="button" id="nextBtn" hidden>Next prize →</button>
+      </div>
+      <p class="msg" id="msg">Press <b>Space</b> to draw.</p>
+    </section>
+    <aside class="side" aria-label="Winners of this prize"><h2 id="winTitle">Winners</h2><ol class="winners" id="winList"></ol></aside>
+  </div>
+  <footer><span id="pool"></span><span>Powered by <img src="/jupiter-logo-light.png" alt="Jupiter Systems, Inc."></span></footer>
+</div>
+
+<script src="/shared.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = EG.esc;
+  const slug = decodeURIComponent(location.pathname.split('/')[1] || '');
+  const API = `/api/e/${encodeURIComponent(slug)}/raffle`;
+  const PIN_KEY = `eg_raffle_pin_${slug}`;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let pin = ''; try { pin = sessionStorage.getItem(PIN_KEY) || ''; } catch {}
+  let st = null, prizeId = null, last = null, busy = false;
+
+  const headers = () => ({ 'content-type': 'application/json', ...(pin ? { 'x-raffle-pin': pin } : {}) });
+  async function call(path, body) {
+    const r = await fetch(API + path, { method: body ? 'POST' : 'GET', headers: headers(), body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(j.message || 'Something went wrong.'), { status: r.status, body: j });
+    return j;
+  }
+  function show(view) { for (const id of ['pinView', 'msgView', 'stage']) $(id).hidden = id !== view; }
+  function message(title, text) { $('msgTitle').textContent = title; $('msgText').textContent = text; show('msgView'); }
+
+  async function load() {
+    try { st = await call(''); start(); }
+    catch (err) {
+      if (err.status === 401) { show('pinView'); $('pinErr').textContent = pin ? err.message : ''; try { sessionStorage.removeItem(PIN_KEY); } catch {} pin = ''; $('pin').focus(); }
+      else if (err.body && err.body.disabled) message('The raffle is off', err.message);
+      else if (err.status === 404) message('Event not found', 'Check the address of the draw screen.');
+      else message('Can’t reach the server', 'Check the connection, then refresh the page.');
+    }
+  }
+  $('pinForm').addEventListener('submit', (e) => { e.preventDefault(); pin = $('pin').value.trim(); try { sessionStorage.setItem(PIN_KEY, pin); } catch {} load(); });
+
+  function brand() {
+    const b = st.branding, r = document.documentElement.style;
+    r.setProperty('--primary', b.primary);
+    r.setProperty('--on-primary', EG.textOn(b.primary));
+    r.setProperty('--display', EG.fontStack(b.headingFont));
+    r.setProperty('--body', EG.fontStack(b.bodyFont));
+    const url = EG.googleFontsUrl([b.headingFont, b.bodyFont]);
+    if (url) $('fontLink').href = url.replace(':wght@400;700', ':wght@400;700;900');
+    $('logos').innerHTML = [b.logo, b.logo2].filter(Boolean).map((src) => `<img src="${esc(src)}" alt="">`).join('');
+    $('evName').textContent = st.event.name;
+    $('evDate').textContent = st.event.date || '';
+    document.title = `Raffle: ${st.event.name}`;
+  }
+  function start() {
+    show('stage');
+    brand();
+    const open = st.prizes.find((p) => p.left > 0);
+    if (!prizeId || !st.prizes.some((p) => p.id === prizeId)) prizeId = open ? open.id : (st.prizes[0] || {}).id || null;
+    renderAll();
+  }
+  const cur = () => st.prizes.find((p) => p.id === prizeId) || null;
+  function renderAll() {
+    $('prizeList').innerHTML = st.prizes.length ? st.prizes.map((p) => `<button type="button" class="prize${p.left ? '' : ' done'}" data-id="${p.id}" aria-pressed="${p.id === prizeId}"><b>${esc(p.name)}</b><span>${p.drawn} of ${p.quantity} drawn</span></button>`).join('')
+      : '<p style="color:var(--muted)">No prizes yet. Add them in the event’s Raffle tab, then refresh.</p>';
+    const p = cur();
+    $('pool').textContent = `${st.eligible} ${st.eligible === 1 ? 'person' : 'people'} can still win${st.entries === 'staff' ? ` (${st.totalEntries} entries)` : ''} · ${st.pool === 'checkedIn' ? 'checked-in attendees only' : 'everyone registered'}${st.oncePerPerson ? ' · one prize per person' : ''}${st.mustBePresent ? ' · winners must be present' : ''}`;
+    if (!p) { $('prizeName').textContent = 'No prizes yet'; $('prizeLeft').textContent = ''; $('drawBtn').disabled = true; $('winList').innerHTML = ''; return; }
+    $('prizeName').textContent = p.name;
+    $('prizeLeft').textContent = p.left ? `${p.left} of ${p.quantity} left to draw` : `All ${p.quantity} drawn`;
+    $('drawBtn').disabled = busy || !p.left || !st.eligible;
+    $('winTitle').textContent = `Winners: ${p.name}`;
+    $('winList').innerHTML = p.winners.map((w) => `<li class="${w.status === 'claimed' ? 'claimed' : ''}"><b>${esc(w.name)}</b>${w.detail ? `<span>${esc(w.detail)}</span>` : ''}</li>`).join('');
+    const next = st.prizes.find((x) => x.left > 0 && x.id !== p.id);
+    $('nextBtn').hidden = busy || p.left > 0 || !next;
+    const isLast = last && last.prizeId === p.id && p.winners.some((w) => w.id === last.id && w.status !== 'noshow');
+    $('noshowBtn').hidden = busy || !isLast || !st.mustBePresent; // absent winners keep the prize when the event allows it
+    $('claimBtn').hidden = busy || !isLast || (p.winners.find((w) => w.id === last.id) || {}).status === 'claimed';
+    if (!busy && !last) $('msg').innerHTML = p.left ? (st.eligible ? 'Press <b>Space</b> to draw.' : 'No one is left who can win.') : (next ? 'This prize is done. Choose the next prize.' : 'All prizes have been drawn. Congratulations to the winners!');
+  }
+  $('prizeList').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-id]');
+    if (!b || busy) return;
+    prizeId = Number(b.dataset.id); last = null;
+    $('reel').className = 'reel'; $('reelName').textContent = 'Ready'; $('reelDetail').textContent = '';
+    renderAll();
+  });
+  $('nextBtn').addEventListener('click', () => {
+    const next = st.prizes.find((x) => x.left > 0);
+    if (!next) return;
+    prizeId = next.id; last = null;
+    $('reel').className = 'reel'; $('reelName').textContent = 'Ready'; $('reelDetail').textContent = '';
+    renderAll();
+  });
+
+  // The winner is chosen by the server first; the names that flash past are only for show.
+  function spin(reel, winner) {
+    return new Promise((resolve) => {
+      const box = $('reel');
+      if (reduceMotion || !reel.length) return resolve();
+      box.className = 'reel spinning';
+      $('reelDetail').textContent = '';
+      const names = [];
+      while (names.length < 20) names.push(...reel);
+      const seq = names.slice(0, 20); // about 3.5 seconds, slowing down towards the end
+      let i = 0, delay = 50;
+      const tick = () => {
+        if (i >= seq.length) return resolve();
+        $('reelName').textContent = seq[i++];
+        delay = Math.min(delay * 1.14, 300);
+        setTimeout(tick, delay);
+      };
+      tick();
+    });
+  }
+  function confetti() {
+    if (reduceMotion) return;
+    const box = document.createElement('div');
+    box.className = 'confetti';
+    const colors = [getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#E00000', '#FFFFFF', '#FFD54F', '#7BD88F', '#64B5F6'];
+    for (let k = 0; k < 90; k++) {
+      const i = document.createElement('i');
+      i.style.left = `${Math.random() * 100}%`;
+      i.style.background = colors[k % colors.length];
+      i.style.animationDuration = `${2.2 + Math.random() * 2}s`;
+      i.style.animationDelay = `${Math.random() * .6}s`;
+      box.appendChild(i);
+    }
+    document.body.appendChild(box);
+    setTimeout(() => box.remove(), 5200);
+  }
+  async function draw() {
+    const p = cur();
+    if (busy || !p || !p.left) return;
+    busy = true; last = null; renderAll();
+    $('msg').textContent = 'Drawing…';
+    try {
+      const out = await call('/draw', { prizeId: p.id });
+      await spin(out.reel, out.draw);
+      $('reelName').textContent = out.draw.name;
+      $('reelDetail').textContent = out.draw.detail || '';
+      $('reel').className = 'reel won';
+      confetti();
+      st = { ...st, ...out.state };
+      last = out.draw;
+      $('msg').textContent = st.mustBePresent ? 'If the winner isn’t here, press “Not here? Redraw”.' : 'Winners who aren’t here can claim their prize later.';
+    } catch (err) {
+      $('reel').className = 'reel';
+      $('msg').textContent = err.message;
+      if (err.status === 401) { busy = false; return load(); }
+      try { st = await call(''); } catch {}
+    }
+    busy = false;
+    renderAll();
+  }
+  async function setStatus(status) {
+    if (!last || busy) return;
+    busy = true;
+    try { st = await call(`/draws/${last.id}`, { status }); } catch (err) { $('msg').textContent = err.message; }
+    busy = false;
+    if (status === 'noshow') { const missed = last.name; last = null; $('reel').className = 'reel'; $('reelName').textContent = 'Redrawing…'; $('reelDetail').textContent = `${missed} wasn’t here`; renderAll(); return draw(); }
+    $('msg').textContent = 'Prize marked as claimed.';
+    renderAll();
+  }
+  $('drawBtn').addEventListener('click', draw);
+  $('noshowBtn').addEventListener('click', () => setStatus('noshow'));
+  $('claimBtn').addEventListener('click', () => setStatus('claimed'));
+  const fullscreen = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); };
+  $('fsBtn').addEventListener('click', fullscreen);
+  document.addEventListener('keydown', (e) => {
+    if ($('stage').hidden || e.target.closest('input, textarea')) return;
+    if (e.key === ' ' || e.key === 'Enter') { if (e.target.closest('button') && e.target.id !== 'drawBtn') return; e.preventDefault(); draw(); }
+    else if (e.key === 'f' || e.key === 'F') fullscreen();
+  });
+  load();
+})();
+</script>
+</body>
+</html>

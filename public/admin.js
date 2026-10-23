@@ -647,6 +647,7 @@
     $('tDash').hidden = tab !== 'dash';
     $('tData').hidden = tab !== 'data';
     $('tSettings').hidden = tab !== 'settings';
+    if (tab === 'raffle') window.RaffleAdmin.open(cur); else window.RaffleAdmin.close();
     $('live').hidden = tab !== 'dash';
     if (tab === 'settings') window.Settings.open(cur, { onSaved: async (fresh) => { cur = { ...cur, ...fresh }; renderEventHead(); if (window.Analysis) window.Analysis.setEvent(cur); } });
     else window.Settings.close();
@@ -670,6 +671,7 @@
         try { await loadEventDetail(cur.id); renderEventHead(); if (window.Analysis) window.Analysis.setEvent(cur); } catch {}
       }
       if (d.type !== 'sessions' && tab === 'data' && (d.type === 'reset')) loadBackups();
+      if (tab === 'raffle' && ['raffle', 'checkin', 'checked_in', 'registered', 'reset'].includes(d.type)) window.RaffleAdmin.reload();
       scheduleRefresh();
     });
     stream.addEventListener('error', () => setLive(false));
