@@ -34,26 +34,27 @@
   .wrap.single { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
 
   /* ---------- intro ---------- */
-  /* Images (logo and an optional second image): size, position and top/bottom come from the event's settings.
-     The top row is the same width as the form, so a centred or right-aligned logo lines up with it. */
-  .logo-row { max-width: 640px; display: flex; align-items: center; flex-wrap: wrap; gap: 1rem 1.5rem; justify-content: var(--logo-justify, flex-start); margin: 0 0 1.5rem; }
-  .logo-row:empty, .logo-bottom:empty { display: none; }
-  .logo-row img, .logo-bottom img { display: block; max-width: 100%; height: auto; min-width: 0; flex: 0 1 auto; }
-  .logo-bottom { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 1rem 2rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
-  /* Logo beside the event name (left or right of it) */
-  .title-row.beside { display: flex; align-items: center; gap: clamp(1rem, 3vw, 1.75rem); max-width: 640px; margin-bottom: 1rem; }
-  .title-row.beside.on-right { flex-direction: row-reverse; justify-content: flex-end; }
-  .title-row.beside h1 { flex: 1; min-width: 0; margin: 0; }
-  .title-row.beside .logo-row { flex: none; max-width: 40%; margin: 0; flex-wrap: nowrap; gap: 1rem; }
-  /* two images beside the name stack, and the title is a little smaller, so long words never get split */
-  .title-row.beside.two .logo-row { flex-direction: column; align-items: center; }
-  .title-row.beside h1 { font-size: clamp(1.9rem, 4.2vw, 2.9rem); }
-  /* Phones: not enough room beside the name, so the logo goes above it */
+  /* Images (logo and an optional second image). Each has its own position from the event's settings:
+     a row above the event name, beside it, or a row at the bottom of the page; each row has left,
+     centre and right spots. The top row is as wide as the form, so the images line up with it. */
+  .img-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 1rem; max-width: 640px; margin: 0 0 1.5rem; }
+  .img-row:empty, .img-side:empty { display: none; }
+  .img-row .z { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem 1.5rem; min-width: 0; }
+  .img-row .z-left { justify-content: flex-start; }
+  .img-row .z-center { justify-content: center; }
+  .img-row .z-right { justify-content: flex-end; }
+  .img-row img, .img-side img { display: block; max-width: 100%; height: auto; min-width: 0; }
+  .img-bottom { grid-column: 1 / -1; max-width: none; margin: 0; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+  .title-row { max-width: 640px; }
+  .title-row.beside { display: flex; align-items: center; gap: clamp(1rem, 3vw, 1.75rem); margin-bottom: 1rem; }
+  /* a little smaller beside images, so long words in the name never get split */
+  .title-row.beside h1 { flex: 1; min-width: 0; margin: 0; font-size: clamp(1.9rem, 4.2vw, 2.9rem); }
+  .img-side { flex: none; max-width: 32%; display: flex; flex-direction: column; align-items: center; gap: .75rem; }
+  /* Phones: images beside the name move above it, side by side */
   @media (max-width: 560px) {
-    .title-row.beside, .title-row.beside.on-right { display: block; }
-    .title-row.beside .logo-row { max-width: none; margin: 0 0 1.25rem; flex-wrap: wrap; }
-    .title-row.beside h1 { margin: 0 0 1rem; }
-    .title-row.beside.two .logo-row { flex-direction: row; }
+    .title-row.beside { flex-wrap: wrap; gap: 1rem; }
+    .title-row.beside h1 { order: 2; flex-basis: 100%; margin: 0 0 1rem; }
+    .img-side { order: 1; max-width: 46%; }
   }
   h1 { font: 700 clamp(2.1rem, 5.4vw, 3.6rem)/1.04 var(--display); letter-spacing: -0.02em; margin: 0 0 1rem; overflow-wrap: break-word; }
   .meta { margin: 0; color: var(--muted); font-size: 1.02rem; }
@@ -174,9 +175,11 @@
 <body>
 <main class="wrap" id="wrap">
   <section id="main">
+    <div class="img-row" id="imgAbove"></div>
     <div class="title-row" id="titleRow">
-      <div class="logo-row" id="logoTop"></div>
+      <div class="img-side" id="imgLeft"></div>
       <h1 id="evName">Event registration</h1>
+      <div class="img-side" id="imgRight"></div>
     </div>
     <p class="meta"><span id="evDate"></span><span id="evVenue"></span></p>
     <div class="lede" id="intro"></div>
@@ -233,7 +236,7 @@
       </div>
     </div>
   </aside>
-  <div class="logo-bottom" id="logoBottom"></div>
+  <div class="img-row img-bottom" id="imgBottom"></div>
   <footer class="powered">
     <span>Powered by</span>
     <img src="/jupiter-logo.png" alt="Jupiter Systems, Inc." width="76" height="24">
@@ -267,24 +270,28 @@
     r.fontSize = `${EG.TEXT_SIZES[b.textSize] || 16}px`;
     const url = EG.googleFontsUrl([b.headingFont, b.bodyFont]);
     if (url && $('fontLink').href !== url) $('fontLink').href = url;
-    // Images at the top (above or beside the event name) and at the bottom of the page.
-    const [lh, lw] = (EG.LOGO_SIZES[b.logoSize] || EG.LOGO_SIZES.medium).page;
-    const { top, bottom } = EG.placedImages(b, 'page');
-    const place = top.length ? b.logoPlace || 'above' : 'above';
-    const imgs = (list, share) => list.map((im) => {
+    // Images: each in its own spot above the event name, beside it, or at the bottom of the page.
+    const L = EG.imageLayout(b, 'page');
+    const mk = (im, share) => {
+      const [lh, lw] = EG.LOGO_SIZES[im.size].page;
       const img = new Image();
       img.src = im.src;
       img.alt = im.n === 1 && ev ? (ev.details.organizer || ev.details.name) : '';
-      const d = EG.balancedSize(im.dims, lw * (list.length === 2 ? share : 1), lh);
+      const d = EG.balancedSize(im.dims, lw * share, lh);
       if (d) { img.width = Math.round(d.w); img.height = Math.round(d.h); } else { img.style.maxHeight = `${lh}px`; img.style.maxWidth = `${lw}px`; }
       return img;
-    });
-    $('logoTop').replaceChildren(...imgs(top, place === 'above' ? 0.8 : 0.6));
-    $('logoBottom').replaceChildren(...imgs(bottom, 0.8));
-    $('logoTop').style.setProperty('--logo-justify', { left: 'flex-start', center: 'center', right: 'flex-end' }[b.logoAlign || 'left']);
-    $('titleRow').classList.toggle('beside', place !== 'above');
-    $('titleRow').classList.toggle('on-right', place === 'right');
-    $('titleRow').classList.toggle('two', top.length === 2);
+    };
+    const row = (zones, count) => (count ? ['left', 'center', 'right'].map((side) => {
+      const z = document.createElement('div');
+      z.className = `z z-${side}`;
+      z.append(...zones[side].map((im) => mk(im, count === 2 ? 0.8 : 1)));
+      return z;
+    }) : []);
+    $('imgAbove').replaceChildren(...row(L.above, L.aboveCount));
+    $('imgBottom').replaceChildren(...row(L.bottom, L.bottomCount));
+    $('imgLeft').replaceChildren(...L.beside.left.map((im) => mk(im, 1)));
+    $('imgRight').replaceChildren(...L.beside.right.map((im) => mk(im, 1)));
+    $('titleRow').classList.toggle('beside', L.besideCount > 0);
   }
 
   // ---------- form fields ----------

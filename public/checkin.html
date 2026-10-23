@@ -110,19 +110,21 @@
   #tag .t-nm { font-weight: 800; line-height: 1.02; letter-spacing: -0.01em; overflow-wrap: anywhere; max-width: 100%; }
   #tag .t-ds { font: 600 calc(var(--tag-h) * .085 * var(--fit))/1.2 var(--body); margin-top: .55em; overflow-wrap: anywhere; max-width: 100%; }
   #tag .t-co { font: 400 calc(var(--tag-h) * .08 * var(--fit))/1.2 var(--body); margin-top: .15em; overflow-wrap: anywhere; max-width: 100%; }
-  /* The logo sits above the event name, or beside it (left or right). */
+  /* Images on the tag, each in its own spot: a row above the event name (left, centre, right spots),
+     beside the event name, and/or a row at the bottom. Sizes come from the event's Name tag settings. */
   #tag .t-head { width: 100%; display: flex; flex-direction: column; align-items: center; }
-  #tag .t-head.beside { flex-direction: row; justify-content: center; gap: calc(var(--tag-w) * .03); margin-bottom: .7em; align-items: center; }
-  #tag .t-head.beside.on-right { flex-direction: row-reverse; }
-  #tag .t-head.beside .t-imgs { width: auto; margin: 0; flex: 0 1 auto; max-width: 48%; }
-  #tag .t-head.beside .t-ev { margin-bottom: 0; text-align: left; }
-  #tag .t-head.beside.on-right .t-ev { text-align: right; }
-  /* Logo size and position come from the event's Name tag settings. */
-  /* Images on the tag: a row at the top (above or beside the event name) and/or a row at the bottom. */
-  #tag .t-imgs { width: 100%; display: flex; align-items: center; justify-content: var(--logo-justify, center); gap: calc(var(--tag-w) * .03); margin: 0 0 calc(var(--tag-h) * .03); }
-  #tag .t-imgs:empty { display: none; }
-  #tag .t-imgs img { display: block; height: calc(var(--tag-h) * var(--h, .14) * var(--fit)); width: auto; max-width: var(--mw, 60%); min-width: 0; object-fit: contain; }
-  #tag .t-foot { justify-content: center; margin: calc(var(--tag-h) * .04) 0 0; }
+  #tag .t-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: calc(var(--tag-w) * .02); }
+  #tag .t-above { margin: 0 0 calc(var(--tag-h) * .03); }
+  #tag .t-bottom { margin: calc(var(--tag-h) * .04) 0 0; }
+  #tag .t-z { display: flex; align-items: center; gap: calc(var(--tag-w) * .03); min-width: 0; }
+  #tag .t-z-left { justify-content: flex-start; }
+  #tag .t-z-center { justify-content: center; }
+  #tag .t-z-right { justify-content: flex-end; }
+  #tag .t-headrow { width: 100%; display: flex; align-items: center; justify-content: center; gap: calc(var(--tag-w) * .03); margin-bottom: .7em; }
+  #tag .t-headrow .t-ev { margin-bottom: 0; }
+  #tag .t-side { flex: 0 1 auto; max-width: 30%; display: flex; flex-direction: column; align-items: center; gap: calc(var(--tag-h) * .02); }
+  #tag .t-head img, #tag .t-bottom img { display: block; height: calc(var(--tag-h) * var(--h, .14) * var(--fit)); width: auto; max-width: var(--mw, 60%); min-width: 0; object-fit: contain; }
+  #tag .t-side img { max-width: 100%; }
   #tag .t-pw { position: absolute; left: 0; right: 0; bottom: 3.5%; display: flex; align-items: center; justify-content: center; gap: .45em; font: 400 calc(var(--tag-h) * .034)/1 var(--body); color: #555; }
   #tag .t-pw img { height: calc(var(--tag-h) * .062); width: auto; display: block; }
   @media print {
@@ -204,14 +206,11 @@
 
 <div id="tag" aria-hidden="true">
   <div class="t-body" id="tBody">
-    <div class="t-head" id="tHead">
-      <div class="t-imgs" id="tTop"></div>
-      <div class="t-ev" id="tEv"></div>
-    </div>
+    <div class="t-head" id="tHead"></div>
     <div class="t-nm" id="tNm"></div>
     <div class="t-ds" id="tDs"></div>
     <div class="t-co" id="tCo"></div>
-    <div class="t-imgs t-foot" id="tBottom"></div>
+    <div id="tBottom" style="width:100%"></div>
   </div>
   <div class="t-pw">Powered by <img src="/jupiter-logo.png" alt=""></div>
 </div>
@@ -226,8 +225,7 @@
   let last = { text: '', at: 0 };
   let busy = false;
   let eventName = '';
-  let tagHasTop = false;
-  let tagPlace = 'above';
+  let tagParts = { above: '', left: '', right: '', bottom: '', beside: false };
   const slug = decodeURIComponent(location.pathname.split('/')[1] || '');
   const API = `/api/e/${encodeURIComponent(slug)}`;
   const PIN_KEY = `staffPin:${slug}`;
@@ -279,23 +277,8 @@
     rs.setProperty('--body', EG.fontStack(b.bodyFont));
     const url = EG.googleFontsUrl([b.headingFont, b.bodyFont]);
     if (url) $('fontLink').href = url;
-    // Name tag images. Sizes are shares of the label (measured on a 4 x 3 label), so they scale to any label size.
-    const [lh, lw] = (EG.LOGO_SIZES[b.tagLogoSize] || EG.LOGO_SIZES.medium).tag;
-    const { top, bottom } = EG.placedImages(b, 'tag');
-    const tagImgs = (list, share) => list.map((im) => {
-      const img = new Image();
-      img.src = im.src; img.alt = '';
-      const each = list.length === 2 ? share : 1;
-      const d = EG.balancedSize(im.dims, lw * each * 400, lh * 300);
-      img.style.setProperty('--h', d ? d.h / 300 : lh);
-      img.style.setProperty('--mw', `${lw * each * 100}%`);
-      return img;
-    });
-    $('tTop').replaceChildren(...tagImgs(top, 0.8));
-    $('tBottom').replaceChildren(...tagImgs(bottom, 0.8));
-    $('tTop').style.setProperty('--logo-justify', { left: 'flex-start', center: 'center', right: 'flex-end' }[b.tagLogoAlign || 'center']);
-    tagHasTop = top.length > 0;
-    tagPlace = b.tagLogoPlace || 'above';
+    // Name tag images, each in its own spot (built once; the same for every tag of this event).
+    tagParts = EG.tagImageParts(b, Boolean(eventName), EG.esc);
     if (ev.status === 'archived') throw new Error('ended');
     ck = ev.checkin || ck;
     if (!ck.enabled) throw new Error('off');
@@ -331,12 +314,9 @@
     }
   }
   function printTag(a) {
-    $('tEv').textContent = eventName;
-    $('tEv').hidden = !eventName;
-    // beside the event name only when both are printed
-    const beside = tagHasTop && Boolean(eventName) && tagPlace !== 'above';
-    $('tHead').classList.toggle('beside', beside);
-    $('tHead').classList.toggle('on-right', beside && tagPlace === 'right');
+    const evLine = eventName ? `<div class="t-ev">${EG.esc(eventName)}</div>` : '';
+    $('tHead').innerHTML = tagParts.above + (tagParts.beside ? `<div class="t-headrow">${tagParts.left}${evLine}${tagParts.right}</div>` : evLine);
+    $('tBottom').innerHTML = tagParts.bottom;
     $('tNm').textContent = a.name;
     $('tDs').textContent = a.line2 || '';
     $('tDs').hidden = !a.line2;

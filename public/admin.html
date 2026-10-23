@@ -195,6 +195,42 @@
   .logo-box { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .logo-prev { width: 180px; height: 84px; border-radius: 10px; background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; border: 1.5px dashed var(--line); display: grid; place-items: center; color: var(--muted); font-size: .82rem; overflow: hidden; }
   .logo-prev img { max-width: 160px; max-height: 70px; display: block; }
+  /* image position map */
+  .img-ctl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; align-items: center; padding: 14px; border: 1.5px solid var(--line); border-radius: 12px; }
+  .img-ctl-head { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
+  .img-ctl-head img { width: 64px; height: 36px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 3px; flex: none; }
+  .img-ctl-head b { display: block; font-weight: 600; }
+  .pos-label { display: block; color: var(--muted); font-size: .84rem; }
+  .pos-pick { width: 232px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .pp-row { display: flex; justify-content: space-between; gap: 8px; }
+  .pp-mid { align-items: center; }
+  .pp-name { flex: 1; text-align: center; font: 700 .76rem var(--body); color: var(--ink); background: var(--surface); border-radius: 6px; padding: 7px 4px; }
+  .pp-body { display: flex; flex-direction: column; gap: 4px; padding: 2px 34px; }
+  .pp-body i { display: block; height: 5px; border-radius: 3px; background: var(--line); }
+  .pp-body i:nth-child(2) { width: 75%; }
+  .pp-cap { font-size: .7rem; color: var(--muted); text-align: center; margin-top: -2px; }
+  .pp-spot { width: 58px; height: 28px; border: 1.5px dashed var(--line); border-radius: 6px; background: var(--surface); cursor: pointer; font: 700 .8rem var(--body); color: var(--muted); display: grid; place-items: center; padding: 0; }
+  .pp-mid .pp-spot { width: 40px; height: 40px; }
+  .pp-spot:hover { border-color: var(--ink); }
+  .pp-spot[aria-pressed="true"] { background: var(--cobalt); border: 1.5px solid var(--cobalt); color: var(--on-cobalt); }
+  .pp-other { opacity: .55; }
+  .pp-side { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+  .pp-hide[aria-pressed="true"] { background: var(--cobalt); color: var(--on-cobalt); border-color: var(--cobalt); }
+  @media (max-width: 560px) { .img-ctl { grid-template-columns: 1fr; } }
+  /* name tag preview: image spots (same layout as the printed tag) */
+  .tag-prev .t-head { width: 100%; display: flex; flex-direction: column; align-items: center; }
+  .tag-prev .t-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 2cqw; }
+  .tag-prev .t-above { margin-bottom: 3cqh; }
+  .tag-prev .t-bottom { margin-top: 4cqh; }
+  .tag-prev .t-z { display: flex; align-items: center; gap: 3cqw; min-width: 0; }
+  .tag-prev .t-z-left { justify-content: flex-start; }
+  .tag-prev .t-z-center { justify-content: center; }
+  .tag-prev .t-z-right { justify-content: flex-end; }
+  .tag-prev .t-headrow { width: 100%; display: flex; align-items: center; justify-content: center; gap: 3cqw; margin-bottom: .7em; }
+  .tag-prev .t-headrow .t-ev { margin-bottom: 0; }
+  .tag-prev .t-side { flex: 0 1 auto; max-width: 30%; display: flex; flex-direction: column; align-items: center; gap: 2cqh; }
+  .tag-prev .t-head img, .tag-prev .t-bottom img { display: block; height: calc(var(--h, .14) * 100cqh); width: auto; max-width: var(--mw, 60%); min-width: 0; object-fit: contain; margin: 0; }
+  .tag-prev .t-side img { max-width: 100%; }
   .img-spot { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
   .img-spot > img { width: 72px; height: 40px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 4px; flex: none; }
   .color-row { display: flex; align-items: center; gap: 10px; }
