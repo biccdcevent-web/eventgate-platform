@@ -74,7 +74,7 @@ function loadEvent(row) {
   if (!row) return null;
   let config;
   try { config = withImageDims(EG.sanitizeConfig(JSON.parse(row.config))); } catch { config = EG.defaultConfig(); }
-  return { id: row.id, slug: row.slug, status: row.status, staffPin: row.staff_pin, config, createdAt: row.created_at };
+  return { id: row.id, slug: row.slug, status: row.status, staffPin: row.staff_pin, config, createdAt: row.created_at, clientId: row.client_id || null };
 }
 const eventById = (id) => loadEvent(evQ.byId.get(Number(id)));
 const eventBySlug = (slug) => loadEvent(evQ.bySlug.get(String(slug || '').toLowerCase()));
@@ -333,13 +333,41 @@ app.post('/api/staff/verify', staffPinLimiter, handleVerify);
 app.post('/api/checkin', checkinLimiter, staffPinLimiter, handleCheckin);
 
 // ---------------------------------------------------------------- accounts
-// The administrator signs in as ADMIN_USERNAME (default "admin") with ADMIN_KEY as the password.
-// Client users see only the dashboards of the events assigned to them.
+// Three kinds of account:
+// - platform administrator ("owner"): signs in as ADMIN_USERNAME (default "admin") with ADMIN_KEY; sees everything.
+// - client administrator ("manager"): belongs to one client; creates and manages that client's events,
+//   settings, backups and accounts, and nothing else.
+// - viewer ("client"): sees only the dashboards of the events assigned to them.
+const clientQ = {
+  list: db.prepare('SELECT * FROM clients ORDER BY name COLLATE NOCASE'),
+  byId: db.prepare('SELECT * FROM clients WHERE id = ?'),
+  byName: db.prepare('SELECT * FROM clients WHERE name = ?'),
+  insert: db.prepare('INSERT INTO clients (name, contact, max_events) VALUES (?, ?, ?)'),
+  update: db.prepare('UPDATE clients SET name = @name, contact = @contact, active = @active, max_events = @max_events WHERE id = @id'),
+  remove: db.prepare('DELETE FROM clients WHERE id = ?'),
+  eventIds: db.prepare('SELECT id FROM events WHERE client_id = ?'),
+  activeEvents: db.prepare("SELECT COUNT(*) AS n FROM events WHERE client_id = ? AND status != 'archived'"),
+  allEvents: db.prepare('SELECT COUNT(*) AS n FROM events WHERE client_id = ?'),
+  users: db.prepare("SELECT COUNT(*) AS n, SUM(role = 'manager') AS managers FROM users WHERE client_id = ?"),
+};
+const clientNames = () => new Map(clientQ.list.all().map((c) => [c.id, c.name]));
+// Whether a client may have one more event that isn't archived. Returns an error message, or ''.
+function clientLimitProblem(clientId, exceptEventId) {
+  const c = clientQ.byId.get(clientId);
+  if (!c) return 'That client was not found.';
+  if (!c.active) return `${c.name} is turned off. Turn the client on first.`;
+  if (c.max_events) {
+    let n = clientQ.activeEvents.get(c.id).n;
+    if (exceptEventId) { const row = evQ.byId.get(exceptEventId); if (row && row.client_id === c.id && row.status !== 'archived') n -= 1; }
+    if (n >= c.max_events) return `${c.name} can have up to ${c.max_events} active ${c.max_events === 1 ? 'event' : 'events'}. Archive one first, or ask the platform administrator to raise the limit.`;
+  }
+  return '';
+}
 const userQ = {
   list: db.prepare('SELECT * FROM users ORDER BY name COLLATE NOCASE'),
   byId: db.prepare('SELECT * FROM users WHERE id = ?'),
   byUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
-  insert: db.prepare('INSERT INTO users (name, username, password_hash, can_export, can_charts, must_change_pw) VALUES (@name, @username, @password_hash, @can_export, @can_charts, 1)'),
+  insert: db.prepare('INSERT INTO users (name, username, password_hash, can_export, can_charts, must_change_pw, role, client_id) VALUES (@name, @username, @password_hash, @can_export, @can_charts, 1, @role, @client_id)'),
   loggedIn: db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?"),
   remove: db.prepare('DELETE FROM users WHERE id = ?'),
   events: db.prepare('SELECT event_id FROM user_events WHERE user_id = ?'),
@@ -354,7 +382,20 @@ function setUserEvents(uid, ids) {
 }
 
 const OWNER_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
-const OWNER = { role: 'owner', id: 0, name: 'Administrator', username: OWNER_USERNAME, canExport: true, canCharts: true, eventIds: null };
+const OWNER = { role: 'owner', id: 0, name: 'Administrator', username: OWNER_USERNAME, canExport: true, canCharts: true, eventIds: null, clientId: null, clientName: '' };
+// The signed-in account for a user row, or null when it (or its client) is turned off.
+function authForUser(u) {
+  if (!u || !u.active) return null;
+  const client = u.client_id ? clientQ.byId.get(u.client_id) : null;
+  if (u.client_id && (!client || !client.active)) return null;
+  const manager = u.role === 'manager' && Boolean(client);
+  return {
+    role: manager ? 'manager' : 'client', id: u.id, name: u.name, username: u.username,
+    canExport: manager || Boolean(u.can_export), canCharts: manager || Boolean(u.can_charts), mustChange: Boolean(u.must_change_pw),
+    clientId: client ? client.id : null, clientName: client ? client.name : '',
+    eventIds: manager ? clientQ.eventIds.all(client.id).map((r) => r.id) : userEventIds(u.id),
+  };
+}
 
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16);
@@ -389,8 +430,8 @@ function getAuth(req) {
   if (!(Number(exp) > Date.now()) || !secretMatches(sig, sessionSig(uid, ver, exp))) return null;
   if (uid === '0') return ADMIN_KEY && ver === ownerVer() ? OWNER : null;
   const u = userQ.byId.get(Number(uid));
-  if (!u || !u.active || String(u.session_ver) !== ver) return null;
-  return { role: 'client', id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), mustChange: Boolean(u.must_change_pw), eventIds: userEventIds(u.id) };
+  if (!u || String(u.session_ver) !== ver) return null;
+  return authForUser(u);
 }
 const canSee = (auth, eventId) => auth.role === 'owner' || auth.eventIds.includes(Number(eventId));
 
@@ -414,7 +455,15 @@ const requireSignedIn = (req, res, next) => {
 const requireOwner = (req, res, next) => {
   req.auth = getAuth(req);
   if (!req.auth) return res.status(401).json({ message: 'Sign in to continue.' });
-  return req.auth.role === 'owner' ? next() : res.status(403).json({ message: 'Only the administrator can do this.' });
+  return req.auth.role === 'owner' ? next() : res.status(403).json({ message: 'Only the platform administrator can do this.' });
+};
+// The platform administrator or a client administrator (who is limited to their client's events and accounts).
+const isEditor = (a) => a && (a.role === 'owner' || a.role === 'manager');
+const requireEditor = (req, res, next) => {
+  req.auth = getAuth(req);
+  if (!req.auth) return res.status(401).json({ message: 'Sign in to continue.' });
+  if (req.auth.mustChange) return mustChangeFirst(res);
+  return isEditor(req.auth) ? next() : res.status(403).json({ message: 'Your account can view dashboards but not change events. Ask your administrator.' });
 };
 // Loads :id as req.ev, for anyone allowed to see that event.
 const withEvent = (req, res, next) => {
@@ -423,7 +472,7 @@ const withEvent = (req, res, next) => {
   req.ev = ev;
   next();
 };
-const publicUser = (a) => ({ name: a.name, username: a.username, role: a.role, canExport: a.canExport, canCharts: a.canCharts, mustChange: Boolean(a.mustChange) });
+const publicUser = (a) => ({ name: a.name, username: a.username, role: a.role, canExport: a.canExport, canCharts: a.canCharts, mustChange: Boolean(a.mustChange), clientName: a.clientName || '' });
 
 app.post('/api/admin/login', adminKeyLimiter, (req, res) => {
   const b = req.body || {};
@@ -438,10 +487,12 @@ app.post('/api/admin/login', adminKeyLimiter, (req, res) => {
   }
   const u = userQ.byUsername.get(username);
   if (!passwordMatches(password, u && u.password_hash) || !u) return fail();
-  if (!u.active) return res.status(403).json({ message: 'This account is turned off. Contact the event administrator.' });
+  if (!u.active) return res.status(403).json({ message: 'This account is turned off. Contact your administrator.' });
+  const auth = authForUser(u);
+  if (!auth) return res.status(403).json({ message: 'Your organization’s access is turned off. Contact the platform administrator.' });
   userQ.loggedIn.run(u.id);
   setSession(req, res, u.id, u.session_ver);
-  res.json({ ok: true, user: publicUser({ role: 'client', name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), mustChange: Boolean(u.must_change_pw) }) });
+  res.json({ ok: true, user: publicUser(auth) });
 });
 app.post('/api/admin/logout', (req, res) => { setSession(req, res, null); res.json({ ok: true }); });
 app.get('/api/admin/session', (req, res) => {
@@ -469,71 +520,166 @@ app.post('/api/admin/me/password', adminKeyLimiter, (req, res, next) => { req.al
   res.json({ ok: true });
 });
 
-// ---- users (administrator only)
+// ---- accounts: the platform administrator manages all; a client administrator only their client's
 const eventNames = () => new Map(evQ.all.all().map((r) => [r.id, loadEvent(r).config.details.name]));
-function userOut(u, names = eventNames()) {
+function userOut(u, names = eventNames(), clients = clientNames()) {
+  const manager = u.role === 'manager';
   return {
-    id: u.id, name: u.name, username: u.username, canExport: Boolean(u.can_export), canCharts: Boolean(u.can_charts), active: Boolean(u.active),
+    id: u.id, name: u.name, username: u.username, role: manager ? 'manager' : 'viewer',
+    clientId: u.client_id || null, clientName: u.client_id ? clients.get(u.client_id) || '' : '',
+    canExport: manager || Boolean(u.can_export), canCharts: manager || Boolean(u.can_charts), active: Boolean(u.active),
     createdAt: sqlTimeToIso(u.created_at), lastLoginAt: sqlTimeToIso(u.last_login_at), temporaryPassword: Boolean(u.must_change_pw),
-    events: userEventIds(u.id).filter((id) => names.has(id)).map((id) => ({ id, name: names.get(id) })),
+    // client administrators see all of their client's events, so no list is kept for them
+    events: manager ? [] : userEventIds(u.id).filter((id) => names.has(id)).map((id) => ({ id, name: names.get(id) })),
   };
 }
 const idList = (v) => (Array.isArray(v) ? [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n > 0))] : []);
+const canManageUser = (auth, u) => Boolean(u) && (auth.role === 'owner' || (auth.role === 'manager' && u.client_id === auth.clientId));
+// Events a viewer of this client may be given: the client's own events (or any event for the platform's own viewers).
+function eventsProblem(auth, clientId, events) {
+  if (!events.length) return 'Choose at least one event this user can view.';
+  for (const id of events) {
+    const row = evQ.byId.get(id);
+    if (!row || !canSee(auth, id)) return 'One of the chosen events was not found.';
+    if (clientId && row.client_id !== clientId) return 'Viewers can only be given events of their own client.';
+  }
+  return '';
+}
 
-app.get('/api/admin/users', requireOwner, (req, res) => { const names = eventNames(); res.json(userQ.list.all().map((u) => userOut(u, names))); });
+app.get('/api/admin/users', requireEditor, (req, res) => {
+  const names = eventNames(), clients = clientNames();
+  const rows = userQ.list.all().filter((u) => canManageUser(req.auth, u));
+  res.json(rows.map((u) => userOut(u, names, clients)));
+});
 
-app.post('/api/admin/users', requireOwner, (req, res) => {
+app.post('/api/admin/users', requireEditor, (req, res) => {
   const b = req.body || {};
   const name = String(b.name || '').replace(/\s+/g, ' ').trim();
   const username = String(b.username || '').trim().toLowerCase();
   if (name.length < 2 || name.length > 80) return res.status(422).json({ message: 'Enter a name of 2 to 80 characters.', field: 'name' });
   if (!/^[a-z0-9._@-]{3,60}$/.test(username)) return res.status(422).json({ message: 'Usernames use 3 to 60 letters, numbers, dots, dashes, underscores or @, with no spaces.', field: 'username' });
-  if (username === OWNER_USERNAME) return res.status(422).json({ message: `"${OWNER_USERNAME}" is reserved for the administrator.`, field: 'username' });
+  if (username === OWNER_USERNAME) return res.status(422).json({ message: `"${OWNER_USERNAME}" is reserved for the platform administrator.`, field: 'username' });
   if (userQ.byUsername.get(username)) return res.status(409).json({ message: 'That username is already taken.', field: 'username' });
   const problem = passwordProblem(b.password);
   if (problem) return res.status(422).json({ message: problem, field: 'password' });
-  const events = idList(b.events);
-  if (!events.length) return res.status(422).json({ message: 'Choose at least one event this user can view.', field: 'events' });
-  const id = userQ.insert.run({ name, username, password_hash: hashPassword(b.password), can_export: b.canExport === false ? 0 : 1, can_charts: b.canCharts ? 1 : 0 }).lastInsertRowid;
-  setUserEvents(id, events);
+  const role = b.role === 'manager' ? 'manager' : 'viewer';
+  let clientId = req.auth.role === 'manager' ? req.auth.clientId : (b.clientId ? Number(b.clientId) : null);
+  if (clientId && !clientQ.byId.get(clientId)) return res.status(422).json({ message: 'That client was not found.', field: 'client' });
+  if (role === 'manager' && !clientId) return res.status(422).json({ message: 'Choose the client this administrator belongs to.', field: 'client' });
+  const events = role === 'viewer' ? idList(b.events) : [];
+  if (role === 'viewer') { const p = eventsProblem(req.auth, clientId, events); if (p) return res.status(422).json({ message: p, field: 'events' }); }
+  const id = userQ.insert.run({ name, username, password_hash: hashPassword(b.password), can_export: b.canExport === false ? 0 : 1, can_charts: b.canCharts ? 1 : 0, role, client_id: clientId }).lastInsertRowid;
+  if (role === 'viewer') setUserEvents(id, events);
   res.status(201).json(userOut(userQ.byId.get(id)));
 });
 
-app.patch('/api/admin/users/:uid', requireOwner, (req, res) => {
+app.patch('/api/admin/users/:uid', requireEditor, (req, res) => {
   const u = userQ.byId.get(Number(req.params.uid));
-  if (!u) return res.status(404).json({ message: 'That user no longer exists.' });
+  if (!canManageUser(req.auth, u)) return res.status(404).json({ message: 'That user no longer exists.' });
+  const self = req.auth.role !== 'owner' && u.id === req.auth.id;
   const b = req.body || {};
-  const next = { name: u.name, can_export: u.can_export, can_charts: u.can_charts, active: u.active, password_hash: u.password_hash, session_ver: u.session_ver, must_change_pw: u.must_change_pw };
+  const next = { name: u.name, can_export: u.can_export, can_charts: u.can_charts, active: u.active, password_hash: u.password_hash, session_ver: u.session_ver, must_change_pw: u.must_change_pw, role: u.role };
   if (b.name !== undefined) {
     const name = String(b.name).replace(/\s+/g, ' ').trim();
     if (name.length < 2 || name.length > 80) return res.status(422).json({ message: 'Enter a name of 2 to 80 characters.' });
     next.name = name;
   }
+  if (b.role !== undefined) {
+    if (self) return res.status(422).json({ message: 'You can’t change your own account type.' });
+    const role = b.role === 'manager' ? 'manager' : 'viewer';
+    if (role === 'manager' && !u.client_id) return res.status(422).json({ message: 'Only accounts that belong to a client can be client administrators.' });
+    if (role === 'viewer' && u.role === 'manager' && b.events === undefined) return res.status(422).json({ message: 'Choose the events this viewer can see.' });
+    next.role = role;
+  }
   if (b.canExport !== undefined) next.can_export = b.canExport ? 1 : 0;
   if (b.canCharts !== undefined) next.can_charts = b.canCharts ? 1 : 0;
-  if (b.active !== undefined) { next.active = b.active ? 1 : 0; if (!next.active) next.session_ver += 1; }
+  if (b.active !== undefined) {
+    if (self && !b.active) return res.status(422).json({ message: 'You can’t turn off your own account.' });
+    next.active = b.active ? 1 : 0; if (!next.active) next.session_ver += 1;
+  }
   if (b.password !== undefined) {
     const problem = passwordProblem(b.password);
     if (problem) return res.status(422).json({ message: problem });
     next.password_hash = hashPassword(b.password);
     next.session_ver += 1;
-    next.must_change_pw = 1; // a password set by the administrator is temporary
+    next.must_change_pw = 1; // a password set by an administrator is temporary
   }
-  if (b.events !== undefined) {
+  if (b.events !== undefined && next.role === 'viewer') {
     const events = idList(b.events);
-    if (!events.length) return res.status(422).json({ message: 'Choose at least one event this user can view.' });
+    const p = eventsProblem(req.auth, u.client_id || null, events);
+    if (p) return res.status(422).json({ message: p });
     setUserEvents(u.id, events);
   }
-  db.prepare('UPDATE users SET name = @name, can_export = @can_export, can_charts = @can_charts, active = @active, password_hash = @password_hash, session_ver = @session_ver, must_change_pw = @must_change_pw WHERE id = @id').run({ ...next, id: u.id });
+  if (next.role === 'manager') db.prepare('DELETE FROM user_events WHERE user_id = ?').run(u.id);
+  if (next.role !== u.role) next.session_ver += 1;
+  db.prepare('UPDATE users SET name = @name, can_export = @can_export, can_charts = @can_charts, active = @active, password_hash = @password_hash, session_ver = @session_ver, must_change_pw = @must_change_pw, role = @role WHERE id = @id').run({ ...next, id: u.id });
   bus.emit('change', { type: 'sessions' });
   res.json(userOut(userQ.byId.get(u.id)));
 });
 
-app.delete('/api/admin/users/:uid', requireOwner, (req, res) => {
-  const id = Number(req.params.uid);
-  db.prepare('DELETE FROM user_events WHERE user_id = ?').run(id);
-  userQ.remove.run(id);
+app.delete('/api/admin/users/:uid', requireEditor, (req, res) => {
+  const u = userQ.byId.get(Number(req.params.uid));
+  if (!canManageUser(req.auth, u)) return res.status(404).json({ message: 'That user no longer exists.' });
+  if (req.auth.role !== 'owner' && u.id === req.auth.id) return res.status(422).json({ message: 'You can’t delete your own account.' });
+  db.prepare('DELETE FROM user_events WHERE user_id = ?').run(u.id);
+  userQ.remove.run(u.id);
   bus.emit('change', { type: 'sessions' });
+  res.json({ ok: true });
+});
+
+// ---- clients (platform administrator only)
+function clientOut(c) {
+  const users = clientQ.users.get(c.id);
+  return {
+    id: c.id, name: c.name, contact: c.contact, active: Boolean(c.active), maxEvents: c.max_events || null,
+    activeEvents: clientQ.activeEvents.get(c.id).n, events: clientQ.allEvents.get(c.id).n,
+    users: users.n || 0, managers: users.managers || 0, createdAt: sqlTimeToIso(c.created_at),
+  };
+}
+const maxEventsOf = (v) => (v === null || v === '' || v === undefined ? null : Number.isInteger(Number(v)) && Number(v) > 0 && Number(v) <= 10000 ? Number(v) : NaN);
+app.get('/api/admin/clients', requireEditor, (req, res) => {
+  const list = req.auth.role === 'owner' ? clientQ.list.all() : clientQ.list.all().filter((c) => c.id === req.auth.clientId);
+  res.json(list.map(clientOut));
+});
+app.post('/api/admin/clients', requireOwner, (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').replace(/\s+/g, ' ').trim();
+  if (name.length < 2 || name.length > 100) return res.status(422).json({ message: 'Enter a client name of 2 to 100 characters.', field: 'name' });
+  if (clientQ.byName.get(name)) return res.status(409).json({ message: 'A client with that name already exists.', field: 'name' });
+  const max = maxEventsOf(b.maxEvents);
+  if (Number.isNaN(max)) return res.status(422).json({ message: 'Enter the event limit as a whole number, or leave it blank for no limit.', field: 'maxEvents' });
+  const id = clientQ.insert.run(name, String(b.contact || '').trim().slice(0, 200), max).lastInsertRowid;
+  res.status(201).json(clientOut(clientQ.byId.get(id)));
+});
+app.patch('/api/admin/clients/:cid', requireOwner, (req, res) => {
+  const c = clientQ.byId.get(Number(req.params.cid));
+  if (!c) return res.status(404).json({ message: 'That client was not found.' });
+  const b = req.body || {};
+  const next = { id: c.id, name: c.name, contact: c.contact, active: c.active, max_events: c.max_events };
+  if (b.name !== undefined) {
+    const name = String(b.name).replace(/\s+/g, ' ').trim();
+    if (name.length < 2 || name.length > 100) return res.status(422).json({ message: 'Enter a client name of 2 to 100 characters.' });
+    const other = clientQ.byName.get(name);
+    if (other && other.id !== c.id) return res.status(409).json({ message: 'A client with that name already exists.' });
+    next.name = name;
+  }
+  if (b.contact !== undefined) next.contact = String(b.contact || '').trim().slice(0, 200);
+  if (b.maxEvents !== undefined) {
+    const max = maxEventsOf(b.maxEvents);
+    if (Number.isNaN(max)) return res.status(422).json({ message: 'Enter the event limit as a whole number, or leave it blank for no limit.' });
+    next.max_events = max;
+  }
+  if (b.active !== undefined) next.active = b.active ? 1 : 0;
+  clientQ.update.run(next);
+  bus.emit('change', { type: 'sessions' }); // turning a client off signs its accounts out
+  res.json(clientOut(clientQ.byId.get(c.id)));
+});
+app.delete('/api/admin/clients/:cid', requireOwner, (req, res) => {
+  const c = clientQ.byId.get(Number(req.params.cid));
+  if (!c) return res.status(404).json({ message: 'That client was not found.' });
+  const o = clientOut(c);
+  if (o.events || o.users) return res.status(409).json({ message: 'This client still has events or accounts. Move or delete them first, or turn the client off instead.' });
+  clientQ.remove.run(c.id);
   res.json({ ok: true });
 });
 
@@ -548,9 +694,11 @@ function slugProblem(slug, exceptId) {
   return '';
 }
 
-function eventSummary(ev) {
+function eventSummary(ev, auth, clients) {
   const c = q.counts.get(ev.id);
+  const cname = ev.clientId ? (clients ? clients.get(ev.clientId) : (clientQ.byId.get(ev.clientId) || {}).name) || '' : '';
   return {
+    clientId: ev.clientId, clientName: cname,
     id: ev.id, slug: ev.slug, status: ev.status, name: ev.config.details.name, date: ev.config.details.date,
     venue: ev.config.details.venue, logo: ev.config.branding.logo, primary: ev.config.branding.primary,
     registered: c.total, checkedIn: c.checkedIn, capacity: ev.config.details.capacity,
@@ -559,13 +707,14 @@ function eventSummary(ev) {
 }
 
 app.get('/api/admin/events', requireSignedIn, (req, res) => {
-  res.json(evQ.all.all().map(loadEvent).filter((ev) => canSee(req.auth, ev.id)).map((ev) => eventSummary(ev, req.auth)));
+  const clients = clientNames();
+  res.json(evQ.all.all().map(loadEvent).filter((ev) => canSee(req.auth, ev.id)).map((ev) => eventSummary(ev, req.auth, clients)));
 });
 
 app.get('/api/admin/events/:id', requireSignedIn, withEvent, (req, res) => {
   const ev = req.ev;
   const base = { ...eventSummary(ev, req.auth) };
-  if (req.auth.role === 'owner') return res.json({ ...base, staffPin: ev.staffPin, config: ev.config });
+  if (isEditor(req.auth)) return res.json({ ...base, staffPin: ev.staffPin, config: ev.config });
   const c = ev.config;
   res.json({ ...base, config: { details: { name: c.details.name, date: c.details.date, venue: c.details.venue, timezone: c.details.timezone }, form: { fields: c.form.fields }, badge: c.badge, checkin: c.checkin, branding: { primary: c.branding.primary } } });
 });
@@ -585,14 +734,17 @@ const chartQ = {
   remove: db.prepare('DELETE FROM saved_charts WHERE id = ? AND event_id = ?'),
 };
 
-app.post('/api/admin/events', requireOwner, (req, res) => {
+app.post('/api/admin/events', requireEditor, (req, res) => {
   const b = req.body || {};
   const name = String(b.name || '').replace(/\s+/g, ' ').trim();
   if (name.length < 3 || name.length > 120) return res.status(422).json({ message: 'Enter an event name of 3 to 120 characters.', field: 'name' });
   const slug = String(b.slug || slugify(name)).trim().toLowerCase();
   const problem = slugProblem(slug);
   if (problem) return res.status(422).json({ message: problem, field: 'slug' });
-  const src = b.copyFrom ? eventById(b.copyFrom) : null;
+  // A client administrator's events always belong to their client; the platform administrator chooses (or none).
+  const clientId = req.auth.role === 'manager' ? req.auth.clientId : (b.clientId ? Number(b.clientId) : null);
+  if (clientId) { const p = clientLimitProblem(clientId); if (p) return res.status(422).json({ message: p, field: 'client' }); }
+  const src = b.copyFrom && canSee(req.auth, Number(b.copyFrom)) ? eventById(b.copyFrom) : null;
   let config;
   if (src) {
     config = JSON.parse(JSON.stringify(src.config));
@@ -605,18 +757,31 @@ app.post('/api/admin/events', requireOwner, (req, res) => {
   config = EG.sanitizeConfig(config);
   const pin = String(crypto.randomInt(100000, 999999));
   const id = evQ.insert.run(slug, 'draft', pin, JSON.stringify(config)).lastInsertRowid;
+  if (clientId) db.prepare('UPDATE events SET client_id = ? WHERE id = ?').run(clientId, id);
   const charts = src ? chartQ.list.all(src.id).map((c) => [c.title, c.dimension, c.metric, c.chartType, c.filter]) : defaultCharts(config);
   for (const [title, dimension, metric, chart_type, filter] of charts) chartQ.insert.run({ event_id: id, title, dimension, metric, chart_type, filter });
+  if (req.auth.role === 'manager') bus.emit('change', { type: 'sessions' }); // the client's other administrators see it too
   res.status(201).json(eventSummary(eventById(id), req.auth));
 });
 
-app.put('/api/admin/events/:id', requireOwner, withEvent, (req, res) => {
+app.put('/api/admin/events/:id', requireEditor, withEvent, (req, res) => {
   const ev = req.ev;
   const b = req.body || {};
   const slug = b.slug !== undefined ? String(b.slug).trim().toLowerCase() : ev.slug;
   if (slug !== ev.slug) { const p = slugProblem(slug, ev.id); if (p) return res.status(422).json({ message: p, field: 'slug' }); }
   const status = b.status !== undefined ? b.status : ev.status;
   if (!STATUSES.includes(status)) return res.status(422).json({ message: 'Choose a valid status.' });
+  // Only the platform administrator moves an event to another client (or back to the platform's own events).
+  let clientId = ev.clientId;
+  if (req.auth.role === 'owner' && b.clientId !== undefined) {
+    clientId = b.clientId ? Number(b.clientId) : null;
+    if (clientId && !clientQ.byId.get(clientId)) return res.status(422).json({ message: 'That client was not found.' });
+  }
+  // Bringing an event back from the archive, or moving it to a client, counts toward the client's event limit.
+  if (clientId && status !== 'archived' && (ev.status === 'archived' || clientId !== ev.clientId)) {
+    const p = clientLimitProblem(clientId, clientId === ev.clientId ? ev.id : null);
+    if (p) return res.status(422).json({ message: p });
+  }
   const pin = b.staffPin !== undefined ? String(b.staffPin).trim() : ev.staffPin;
   if (!/^\d{4,12}$/.test(pin)) return res.status(422).json({ message: 'The staff PIN must be 4 to 12 digits.', field: 'staffPin' });
   let config = ev.config;
@@ -627,13 +792,19 @@ app.put('/api/admin/events/:id', requireOwner, withEvent, (req, res) => {
     }
   }
   evQ.update.run({ id: ev.id, slug, status, staff_pin: pin, config: JSON.stringify(config) });
+  if (clientId !== ev.clientId) {
+    db.prepare('UPDATE events SET client_id = ? WHERE id = ?').run(clientId, ev.id);
+    // viewers of another client lose access to it
+    db.prepare('DELETE FROM user_events WHERE event_id = ? AND user_id IN (SELECT id FROM users WHERE client_id IS NOT NULL AND client_id IS NOT ?)').run(ev.id, clientId);
+    bus.emit('change', { type: 'sessions' });
+  }
   if (slug !== ev.slug && getSetting('home_event') === ev.slug) setSetting('home_event', slug);
   bus.emit('change', { type: 'config', eventId: ev.id });
   const fresh = eventById(ev.id);
   res.json({ ...eventSummary(fresh, req.auth), staffPin: fresh.staffPin, config: fresh.config });
 });
 
-app.delete('/api/admin/events/:id', requireOwner, withEvent, (req, res) => {
+app.delete('/api/admin/events/:id', requireEditor, withEvent, (req, res) => {
   const ev = req.ev;
   if (q.counts.get(ev.id).total > 0) return res.status(409).json({ message: 'This event has registrations. Archive it instead, or delete its records first on the Backup & reset tab.' });
   if (String((req.body || {}).confirm || '').trim().toLowerCase() !== ev.slug) return res.status(422).json({ message: `Type ${ev.slug} to confirm.` });
@@ -669,7 +840,7 @@ async function optimizeImage(buf, png) {
   const meta = await sharp(out).metadata();
   return { out, dims: { w: meta.width, h: meta.height } };
 }
-app.post('/api/admin/events/:id/logo', requireOwner, withEvent, express.raw({ type: ['image/png', 'image/jpeg'], limit: '5mb' }), async (req, res) => {
+app.post('/api/admin/events/:id/logo', requireEditor, withEvent, express.raw({ type: ['image/png', 'image/jpeg'], limit: '5mb' }), async (req, res) => {
   const buf = req.body;
   if (!Buffer.isBuffer(buf) || !buf.length) return res.status(422).json({ message: 'Choose a PNG or JPG image up to 5 MB.' });
   const png = buf.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
@@ -695,7 +866,7 @@ function sampleValues(config) {
 }
 const previewEvent = (ev, body) => ({ ...ev, config: body && body.config ? withImageDims(EG.sanitizeConfig(body.config, ev.config)) : ev.config });
 
-app.post('/api/admin/events/:id/email-preview', requireOwner, withEvent, async (req, res) => {
+app.post('/api/admin/events/:id/email-preview', requireEditor, withEvent, async (req, res) => {
   const ev = previewEvent(req.ev, req.body);
   const msg = renderPassEmail({ event: ev, values: sampleValues(ev.config), passCode: 'SAMP-LE00', uploadsDir });
   const qr = (await qrPng('SAMPLE PASS - NOT VALID')).toString('base64');
@@ -707,7 +878,7 @@ app.post('/api/admin/events/:id/email-preview', requireOwner, withEvent, async (
   res.json({ subject: msg.subject, html });
 });
 
-app.post('/api/admin/events/:id/email-test', testMailLimiter, requireOwner, withEvent, async (req, res) => {
+app.post('/api/admin/events/:id/email-test', testMailLimiter, requireEditor, withEvent, async (req, res) => {
   const to = String((req.body || {}).to || '').trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return res.status(422).json({ message: 'Enter the email address to send the test to.' });
   const ev = previewEvent(req.ev, req.body);
@@ -720,7 +891,7 @@ app.post('/api/admin/events/:id/email-test', testMailLimiter, requireOwner, with
 });
 
 // Which event opens at the main address (and /checkin).
-app.get('/api/admin/platform', requireOwner, (req, res) => res.json({ homeEvent: getSetting('home_event'), senderAddress: senderAddress(), smtp: Boolean(process.env.SMTP_HOST) }));
+app.get('/api/admin/platform', requireEditor, (req, res) => res.json({ homeEvent: req.auth.role === 'owner' ? getSetting('home_event') : '', senderAddress: senderAddress(), smtp: Boolean(process.env.SMTP_HOST) }));
 app.put('/api/admin/platform', requireOwner, (req, res) => {
   const slug = String((req.body || {}).homeEvent || '').trim().toLowerCase();
   if (slug && !evQ.bySlug.get(slug)) return res.status(422).json({ message: 'Choose one of your events.' });
@@ -808,7 +979,7 @@ function computeStats(ev) {
 }
 
 const ev$ = [requireSignedIn, withEvent];
-const evOwner$ = [requireOwner, withEvent];
+const evOwner$ = [requireEditor, withEvent]; // event administration: the platform administrator or the event's client administrator
 
 // QR code of the event's registration page, for organizers to put on invitations and posters.
 // PNG (large, for documents and chat) or SVG (sharp at any size, for print).

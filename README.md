@@ -2,7 +2,7 @@
 
 **Version 1.1** · 23 October 2026 · Jupiter Systems, Inc.
 
-What's new in 1.1: up to 2 images per event, optimized automatically on upload; each image placed and sized on its own on the registration page, in the email and on the name tag; "the" before the event name in the email's closing line.
+What's new in 1.1: up to 2 images per event, optimized automatically on upload; each image placed and sized on its own on the registration page, in the email and on the name tag; "the" before the event name in the email's closing line; clients with their own client administrators, who create and manage their own events and accounts.
 
 One system for many events. Each event gets its own registration page at `yourdomain.com/<event-address>`, with its own branding, form fields, confirmation email, name tag, check-in PIN, records, backups and client logins. Registrants receive a QR pass by email, and staff scan it at the door to check them in and print a name tag.
 
@@ -37,7 +37,12 @@ One system for many events. Each event gets its own registration page at `yourdo
 
 **Signing out**: closing the admin page (the tab or the whole browser) signs the user out; refreshing the page does not. Sessions also end after 12 hours.
 
-**Users**: client accounts that can only view the dashboards of the events you assign them, with or without the Excel download.
+**Accounts and clients**: three kinds of account.
+- **Platform administrator** (you): signs in as `admin` with ADMIN_KEY. Sees and manages everything: all events, all accounts, and the **Clients** page.
+- **Client administrator**: belongs to one client (a company you offer the platform to). Creates and manages that client's own events (settings, branding, form, email, name tags, check-in, backups, reports) and the client's accounts. Sees nothing of other clients.
+- **Viewer**: sees the dashboards of the events they're given, with optional Excel download and chart editing.
+
+On the **Clients** page the platform administrator adds clients, can set a limit on how many events a client may have active (not archived), and can turn a client off, which signs out all its accounts. Each event belongs to one client or to Jupiter (no client); the platform administrator can move an event in its Settings.
 
 ## Running it
 

@@ -103,6 +103,20 @@ function openDb(dbPath, env = process.env) {
   // Added later: 1 while the user still has the temporary password the administrator set.
   if (!cols('users').includes('must_change_pw')) db.exec('ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0');
   if (!cols('users').includes('can_charts')) db.exec('ALTER TABLE users ADD COLUMN can_charts INTEGER NOT NULL DEFAULT 0');
+  // Added later: clients (the organizations you offer the platform to). Each event and each client account
+  // can belong to one client. role is 'viewer' (dashboards of assigned events) or 'manager' (client
+  // administrator: creates and manages the client's events and accounts).
+  db.exec(`CREATE TABLE IF NOT EXISTS clients (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    contact    TEXT NOT NULL DEFAULT '',
+    active     INTEGER NOT NULL DEFAULT 1,
+    max_events INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  if (!cols('users').includes('role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer'");
+  if (!cols('users').includes('client_id')) db.exec('ALTER TABLE users ADD COLUMN client_id INTEGER');
+  if (!cols('events').includes('client_id')) db.exec('ALTER TABLE events ADD COLUMN client_id INTEGER');
   if (!hasTable('saved_charts')) {
     db.exec(`CREATE TABLE saved_charts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, dimension TEXT NOT NULL,
