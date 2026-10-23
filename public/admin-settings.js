@@ -186,16 +186,23 @@
     const box = $('tagPrev');
     box.style.setProperty('--tag-font', EG.fontStack(c.branding.headingFont));
     box.style.setProperty('--tag-body', EG.fontStack(c.branding.bodyFont));
+    // Same layout as the printed tag (check-in page): image rows at the top and/or bottom.
     const [lh, lw] = (EG.LOGO_SIZES[c.branding.tagLogoSize] || EG.LOGO_SIZES.medium).tag;
-    const self = { left: 'flex-start', center: 'center', right: 'flex-end' }[c.branding.tagLogoAlign || 'center'];
-    const logoOn = c.branding.logoOnTag && c.branding.logo;
-    const place = logoOn && b.showEventName ? c.branding.tagLogoPlace || 'above' : 'above';
-    const img = logoOn ? `<img class="t-logo" src="${esc(c.branding.logo)}" alt="" style="max-height:${lh * 100}cqh;max-width:${place === 'above' ? lw * 100 : 40}%;align-self:${place === 'above' ? self : 'center'}${place === 'above' ? '' : ';margin:0'}">` : '';
+    const justify = { left: 'flex-start', center: 'center', right: 'flex-end' }[c.branding.tagLogoAlign || 'center'];
+    const { top, bottom } = EG.placedImages(c.branding, 'tag');
+    const place = top.length && b.showEventName ? c.branding.tagLogoPlace || 'above' : 'above';
+    const row = (list, extra) => (list.length ? `<div class="t-imgs" style="display:flex;align-items:center;gap:3cqw;${extra}">${list.map((im) => {
+      const each = list.length === 2 ? 0.8 : 1;
+      const d = EG.balancedSize(im.dims, lw * each * 400, lh * 300);
+      return `<img src="${esc(im.src)}" alt="" style="display:block;height:${((d ? d.h / 300 : lh) * 100).toFixed(2)}cqh;width:auto;max-width:${place === 'above' ? lw * each * 100 : 48}%;min-width:0;object-fit:contain;margin:0">`;
+    }).join('')}</div>` : '');
     const ev = b.showEventName ? `<div class="t-ev"${place === 'above' ? '' : ` style="margin:0;text-align:${place === 'left' ? 'left' : 'right'}"`}>${esc(c.details.name)}</div>` : '';
-    box.innerHTML = `${place === 'above' ? img + ev : `<div class="t-head-row" style="display:flex;align-items:center;justify-content:center;gap:3cqw;margin-bottom:.7em;flex-direction:${place === 'left' ? 'row' : 'row-reverse'}">${img}${ev}</div>`}
+    const topRow = row(top, place === 'above' ? `width:100%;justify-content:${justify};margin-bottom:3cqh` : 'flex:0 1 auto;max-width:48%');
+    box.innerHTML = `${place === 'above' ? topRow + ev : `<div class="t-head-row" style="display:flex;align-items:center;justify-content:center;gap:3cqw;margin-bottom:.7em;width:100%;flex-direction:${place === 'left' ? 'row' : 'row-reverse'}">${topRow}${ev}</div>`}
       <div class="t-nm">Juan dela Cruz</div>
       ${b.line2 ? `<div class="t-ds">${esc(val(b.line2))}</div>` : ''}
       ${b.line3 ? `<div class="t-co">${esc(val(b.line3))}</div>` : ''}
+      ${row(bottom, 'width:100%;justify-content:center;margin-top:4cqh')}
       <div class="t-pw">Powered by <img src="/jupiter-logo.png" alt=""></div>`;
   }
 
@@ -228,21 +235,38 @@
   const area = (path, label, { help = '', rows = 4, max = 4000 } = {}) =>
     `<div class="field"><label for="s_${path}">${esc(label)}</label><textarea id="s_${path}" data-path="${path}" rows="${rows}" maxlength="${max}">${esc(v(path))}</textarea>${help ? `<p class="help">${help}</p>` : ''}</div>`;
   const check = (path, label) => `<label class="check"><input type="checkbox" data-path="${path}"${getPath(path) ? ' checked' : ''}> <span>${esc(label)}</span></label>`;
-  // Position and size buttons for the logo in one place (page, email or name tag).
-  function logoControls(alignKey, sizeKey, note) {
+  // Image settings for one place ('page', 'email' or 'tag'): where each image goes (top, bottom or not shown),
+  // then, for the top, above or beside the event name and left/centre/right, and the size.
+  function logoControls(place, alignKey, sizeKey, note) {
     const b = draft.config.branding;
-    if (!b.logo) return '';
+    const imgs = [[1, b.logo], [2, b.logo2]].filter(([, src]) => src);
+    if (!imgs.length) return '<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">No images yet. Upload them in the Branding section.</p>';
+    const spots = b.imageSpots[place];
     const placeKey = alignKey.replace('Align', 'Place');
+    const anyTop = imgs.some(([n]) => spots[n - 1] === 'top');
+    const anyShown = imgs.some(([n]) => spots[n - 1] !== 'hide');
     const above = (b[placeKey] || 'above') === 'above';
-    const seg = (key, label, opts, def) => `<div class="field"><span class="lbl">${label}</span><div class="seg" role="group" aria-label="Logo ${label.toLowerCase()}">
+    const seg = (key, label, opts, def) => `<div class="field"><span class="lbl">${label}</span><div class="seg" role="group" aria-label="${label}">
       ${opts.map(([k, l]) => `<button type="button" data-logo-key="${key}" data-logo-val="${k}" aria-pressed="${(b[key] || def) === k}">${l}</button>`).join('')}</div></div>`;
-    return `${seg(placeKey, 'Logo placement', [['above', 'Above the event name'], ['left', 'Left of the name'], ['right', 'Right of the name']], 'above')}
-      <div class="two">
-        ${above ? seg(alignKey, 'Logo position', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], alignKey === 'tagLogoAlign' ? 'center' : 'left') : ''}
-        ${seg(sizeKey, 'Logo size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'medium')}
-      </div>${placeKey === 'tagLogoPlace' && !above && !draft.config.badge.showEventName ? '<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">The event name isn’t printed, so the logo goes above the attendee’s name.</p>' : ''}${note ? `<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">${note}</p>` : ''}`;
+    const spotRow = ([n, src]) => `<div class="img-spot"><img src="${esc(src)}" alt="Image ${n}"><div class="field" style="margin:0"><span class="lbl">Image ${n}${n === 1 ? ' (main logo)' : ''}</span><div class="seg" role="group" aria-label="Where image ${n} goes">
+      ${[['top', 'Top'], ['bottom', 'Bottom'], ['hide', 'Don’t show']].map(([k, l]) => `<button type="button" data-spot="${place}:${n}" data-spot-val="${k}" aria-pressed="${spots[n - 1] === k}">${l}</button>`).join('')}</div></div></div>`;
+    const tagNoName = place === 'tag' && anyTop && !above && !draft.config.badge.showEventName;
+    return `${imgs.map(spotRow).join('')}
+      ${anyTop ? seg(placeKey, 'Top images', [['above', 'Above the event name'], ['left', 'Left of the name'], ['right', 'Right of the name']], 'above') : ''}
+      ${anyShown ? `<div class="two">
+        ${anyTop && above ? seg(alignKey, 'Position at the top', [['left', 'Left'], ['center', 'Centre'], ['right', 'Right']], alignKey === 'tagLogoAlign' ? 'center' : 'left') : ''}
+        ${seg(sizeKey, 'Image size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], 'medium')}
+      </div>` : ''}${tagNoName ? '<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">The event name isn’t printed, so the top images go above the attendee’s name.</p>' : ''}${note ? `<p class="help" style="margin:0;color:var(--muted);font-size:.82rem">${note}</p>` : ''}`;
   }
   function wireLogoControls(body) {
+    body.querySelectorAll('[data-spot]').forEach((btn) => btn.addEventListener('click', () => {
+      const [place, n] = btn.dataset.spot.split(':');
+      draft.config.branding.imageSpots[place][Number(n) - 1] = btn.dataset.spotVal;
+      changed();
+      renderSection();
+      const again = $('secBody').querySelector(`[data-spot="${btn.dataset.spot}"][data-spot-val="${btn.dataset.spotVal}"]`);
+      if (again) again.focus();
+    }));
     body.querySelectorAll('[data-logo-key]').forEach((btn) => btn.addEventListener('click', () => {
       draft.config.branding[btn.dataset.logoKey] = btn.dataset.logoVal;
       changed();
@@ -277,7 +301,6 @@
     body.innerHTML = RENDER[section]();
     bind(body);
     wireLogoControls(body);
-    body.querySelectorAll('[data-path="config.branding.logoInEmail"], [data-path="config.branding.logoOnTag"]').forEach((el) => el.addEventListener('change', () => renderSection()));
     (WIRE[section] || (() => {}))(body);
   }
 
@@ -341,17 +364,21 @@
       const fontSel = (key, label) => `<div class="field"><label for="f_${key}">${label}</label><select id="f_${key}" data-path="config.branding.${key}" data-after="fonts">${EG.FONTS.map((f) => `<option${f === b[key] ? ' selected' : ''}>${f}</option>`).join('')}</select><div class="font-sample" id="fs_${key}">The quick brown fox jumps over the lazy dog</div></div>`;
       return `
       <section class="card stack">
-        <h3>Logo</h3>
-        <div class="logo-box">
-          <div class="logo-prev" id="logoPrev">${b.logo ? `<img src="${esc(b.logo)}" alt="Event logo">` : 'No logo'}</div>
+        <h3>Images</h3>
+        <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">Up to 2 images, for example the event logo and the organizer’s or a partner’s logo. PNG or JPG up to 5 MB. Blank margins are trimmed and each image is resized and compressed automatically, keeping its proportions.</p>
+        ${[[1, 'logo', 'Image 1 (main logo)'], [2, 'logo2', 'Image 2']].map(([n, key, title]) => `<div class="logo-box">
+          <div class="logo-prev">${b[key] ? `<img src="${esc(b[key])}" alt="${title}">` : 'No image'}</div>
           <div class="stack" style="gap:8px">
-            <div class="actions"><button class="btn btn-quiet btn-sm" type="button" id="logoPick">${b.logo ? 'Replace logo' : 'Upload logo'}</button>${b.logo ? '<button class="btn btn-quiet btn-sm btn-danger-text" type="button" id="logoRemove">Remove</button>' : ''}</div>
-            <input type="file" id="logoFile" accept="image/png,image/jpeg" hidden>
-            <p class="help" style="margin:0;color:var(--muted);font-size:.82rem">PNG or JPG up to 2 MB. A wide logo on a transparent background looks best.</p>
-            <p class="err" id="logoErr"></p>
+            <b style="font-weight:600">${title}</b>
+            <div class="actions"><button class="btn btn-quiet btn-sm" type="button" data-img-pick="${n}">${b[key] ? 'Replace' : 'Upload'}</button>${b[key] ? `<button class="btn btn-quiet btn-sm btn-danger-text" type="button" data-img-remove="${n}">Remove</button>` : ''}</div>
+            <input type="file" id="imgFile${n}" accept="image/png,image/jpeg" hidden>
+            <p class="err" id="imgErr${n}" role="alert"></p>
           </div>
-        </div>
-        ${logoControls('logoAlign', 'logoSize', 'On the registration page. The email and name tag have their own logo settings in their sections.')}
+        </div>`).join('')}
+      </section>
+      <section class="card stack">
+        <h3>Images on the registration page</h3>
+        ${logoControls('page', 'logoAlign', 'logoSize', 'The email and name tag have their own image settings in their sections.')}
       </section>
       <section class="card stack">
         <h3>Colours</h3>
@@ -417,8 +444,10 @@
           ${summaryOpts.map((f) => `<label class="check"><input type="checkbox" value="${f.key}"${c.email.summaryFields.includes(f.key) ? ' checked' : ''}> <span>${esc(f.label)}</span></label>`).join('')}
         </div><p class="help">The attendee's name is always listed.</p></div>
         ${area('config.email.footer', 'Note at the bottom', { rows: 3, max: 1000 })}
-        ${check('config.branding.logoInEmail', 'Show the event logo in the email')}
-        ${c.branding.logoInEmail ? logoControls('emailLogoAlign', 'emailLogoSize') : ''}
+      </section>
+      <section class="card stack">
+        <h3>Images in the email</h3>
+        ${logoControls('email', 'emailLogoAlign', 'emailLogoSize')}
       </section>
       <section class="card stack">
         <h3>Send a test</h3>
@@ -439,8 +468,10 @@
           <div class="field"><label for="s_l3">Third line</label><select id="s_l3" data-path="config.badge.line3">${opts(c.badge.line3)}</select></div>
         </div>
         ${check('config.badge.showEventName', 'Show the event name at the top')}
-        ${check('config.branding.logoOnTag', 'Print the event logo (in black and white on most label printers)')}
-        ${c.branding.logoOnTag ? logoControls('tagLogoAlign', 'tagLogoSize') : ''}
+      </section>
+      <section class="card stack">
+        <h3>Images on the name tag</h3>
+        ${logoControls('tag', 'tagLogoAlign', 'tagLogoSize', 'Most label printers print images in black and white.')}
       </section>`;
     },
   };
@@ -606,22 +637,32 @@
         body.querySelectorAll('[data-size]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
         changed();
       }));
-      $('logoPick').addEventListener('click', () => $('logoFile').click());
-      $('logoFile').addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        $('logoErr').textContent = '';
-        if (!file) return;
-        if (!['image/png', 'image/jpeg'].includes(file.type)) { $('logoErr').textContent = 'Choose a PNG or JPG image.'; return; }
-        if (file.size > 2 * 1024 * 1024) { $('logoErr').textContent = 'That image is larger than 2 MB. Use a smaller file.'; return; }
-        try {
-          const r = await fetch(`/api/admin/events/${ev.id}/logo`, { method: 'POST', headers: { 'content-type': file.type }, body: file });
-          const out = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(out.message || 'The logo could not be uploaded.');
-          draft.config.branding.logo = out.logo;
-          renderSection(); changed();
-        } catch (err) { $('logoErr').textContent = err.message; }
-      });
-      if ($('logoRemove')) $('logoRemove').addEventListener('click', () => { draft.config.branding.logo = null; renderSection(); changed(); });
+      const keyOf = (n) => (n === '1' ? 'logo' : 'logo2');
+      body.querySelectorAll('[data-img-pick]').forEach((btn) => btn.addEventListener('click', () => $(`imgFile${btn.dataset.imgPick}`).click()));
+      body.querySelectorAll('[data-img-remove]').forEach((btn) => btn.addEventListener('click', () => {
+        const k = keyOf(btn.dataset.imgRemove);
+        draft.config.branding[k] = null; draft.config.branding[`${k}Dims`] = null;
+        renderSection(); changed();
+      }));
+      for (const n of ['1', '2']) {
+        $(`imgFile${n}`).addEventListener('change', async (e) => {
+          const file = e.target.files[0], err = $(`imgErr${n}`);
+          err.textContent = '';
+          if (!file) return;
+          if (!['image/png', 'image/jpeg'].includes(file.type)) { err.textContent = 'Choose a PNG or JPG image.'; return; }
+          if (file.size > 5 * 1024 * 1024) { err.textContent = 'That image is larger than 5 MB. Use a smaller file.'; return; }
+          err.textContent = 'Uploading and optimizing…';
+          try {
+            const r = await fetch(`/api/admin/events/${ev.id}/logo`, { method: 'POST', headers: { 'content-type': file.type }, body: file });
+            const out = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(out.message || 'The image could not be uploaded.');
+            const k = keyOf(n);
+            draft.config.branding[k] = out.logo;
+            draft.config.branding[`${k}Dims`] = out.dims || null;
+            renderSection(); changed();
+          } catch (ex) { err.textContent = ex.message; }
+        });
+      }
       colorWarnings();
       fontSamples();
     },
