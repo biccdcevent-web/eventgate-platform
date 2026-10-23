@@ -86,52 +86,62 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
   const withQr = EG.emailMode(c) === 'qr';   // no QR code or pass code when the event doesn't use them
   const font = `font-family:${EG.fontStack(b.bodyFont).replace(/"/g, "'")};`;
   const hfont = `font-family:${EG.fontStack(b.headingFont).replace(/"/g, "'")};`;
-  // Images (event logo and an optional second image), each at the top, at the bottom, or not shown.
-  const [boxW, boxH] = (EG.LOGO_SIZES[b.emailLogoSize] || EG.LOGO_SIZES.medium).email;
+  // Images (event logo and an optional second image): each has its own spot (above the event name on the
+  // left, centre or right, beside the name, or at the bottom) and its own size.
   const fileOf = (im) => path.join(uploadsDir, path.basename(im.src));
-  const placed = EG.placedImages(b, 'email');
-  const usable = (list) => list.filter((im) => fs.existsSync(fileOf(im))).map((im) => ({ ...im, file: fileOf(im), cid: im.n === 1 ? 'eventlogo' : 'eventlogo2', natural: imageSize(fileOf(im)) }));
-  const topImgs = usable(placed.top), bottomImgs = usable(placed.bottom);
-  const logoAlign = EG.LOGO_ALIGNS.includes(b.emailLogoAlign) ? b.emailLogoAlign : 'left';
-  const logoPlace = topImgs.length && EG.LOGO_PLACES.includes(b.emailLogoPlace) ? b.emailLogoPlace : 'above';
-  // Exact pixel sizes (Outlook ignores max-width): two images share the space and get balanced sizes.
+  const L = EG.imageLayout(b, 'email');
+  const prep = (list) => list.filter((im) => fs.existsSync(fileOf(im))).map((im) => ({ ...im, file: fileOf(im), cid: im.n === 1 ? 'eventlogo' : 'eventlogo2', natural: imageSize(fileOf(im)) }));
+  const zonesOf = (z) => ({ left: prep(z.left), center: prep(z.center), right: prep(z.right) });
+  const above = zonesOf(L.above), bottom = zonesOf(L.bottom);
+  const besideLeft = prep(L.beside.left), besideRight = prep(L.beside.right);
+  const allImgs = [...Object.values(above).flat(), ...besideLeft, ...besideRight, ...Object.values(bottom).flat()];
+  // Exact pixel sizes (Outlook ignores max-width); two images in one row share it and get balanced sizes.
   const sizeOf = (im, share) => {
+    const [boxW, boxH] = EG.LOGO_SIZES[im.size].email;
     const bs = EG.balancedSize(im.natural, boxW * share, boxH);
     let d = bs ? { w: bs.w, h: bs.h } : fitBox(im.natural, boxW * share, boxH);
     if (im.natural && d.w > im.natural.w) d = { w: im.natural.w, h: im.natural.h }; // never enlarge
     return { w: Math.round(d.w), h: Math.round(d.h) };
   };
-  const imgTag = (im, d, margin = '0') => `<img src="cid:${im.cid}" width="${d.w}" height="${d.h}" alt="${im.n === 1 ? esc(c.details.organizer || c.details.name) : ''}" style="display:block;width:${d.w}px;height:${d.h}px;max-width:100%;border:0;outline:none;margin:${margin}">`;
-  // One image, or two side by side with a 20px gap. Returns the HTML and its total width.
-  const group = (list, share, align) => {
-    if (!list.length) return { html: '', w: 0 };
-    if (list.length === 1) { const d = sizeOf(list[0], 1); return { html: imgTag(list[0], d, align ? { left: '0', center: '0 auto', right: '0 0 0 auto' }[align] : '0'), w: d.w }; }
-    const ds = list.map((im) => sizeOf(im, share));
-    const cells = list.map((im, i) => `<td valign="middle"${i ? ' style="padding-left:20px"' : ''}>${imgTag(im, ds[i])}</td>`).join('');
-    const tAlign = align && align !== 'left' ? ` align="${align}"` : '';
-    return { html: `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${tAlign} style="${align === 'center' ? 'margin:0 auto' : align === 'right' ? 'margin:0 0 0 auto' : ''}"><tr>${cells}</tr></table>`, w: ds[0].w + ds[1].w + 20 };
+  const MARGIN = { left: '0', center: '0 auto', right: '0 0 0 auto' };
+  const imgTag = (im, d, align = 'left') => `<img src="cid:${im.cid}" width="${d.w}" height="${d.h}" alt="${im.n === 1 ? esc(c.details.organizer || c.details.name) : ''}" style="display:block;width:${d.w}px;height:${d.h}px;max-width:100%;border:0;outline:none;margin:${MARGIN[align]}">`;
+  // Images in one spot: one image, or two side by side with a 20px gap.
+  const spot = (list, share, align) => {
+    if (list.length === 1) return imgTag(list[0], sizeOf(list[0], share), align);
+    const cells = list.map((im, i) => `<td valign="middle"${i ? ' style="padding-left:20px"' : ''}>${imgTag(im, sizeOf(im, share))}</td>`).join('');
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0"${align !== 'left' ? ` align="${align}"` : ''} style="margin:${MARGIN[align]}"><tr>${cells}</tr></table>`;
+  };
+  // A row with left, centre and right spots, built as table cells so every email app lines them up.
+  const zoneRow = (zones) => {
+    const sides = ['left', 'center', 'right'].filter((k) => zones[k].length);
+    if (!sides.length) return '';
+    const share = sides.reduce((n, k) => n + zones[k].length, 0) === 2 ? 0.8 : 1;
+    if (sides.length === 1) return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${sides[0]}">${spot(zones[sides[0]], share, sides[0])}</td></tr></table>`;
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${['left', 'center', 'right'].map((k) => `<td width="33%" align="${k}" valign="middle">${zones[k].length ? spot(zones[k], share, k) : '&nbsp;'}</td>`).join('')}</tr></table>`;
+  };
+  // Images beside the event name: stacked if both are on the same side. Returns the HTML and its width.
+  const side = (list) => {
+    const ds = list.map((im) => sizeOf(im, 1));
+    const html = list.length === 1 ? imgTag(list[0], ds[0], 'center')
+      : `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">${list.map((im, i) => `<tr><td align="center"${i ? ' style="padding-top:12px"' : ''}>${imgTag(im, ds[i], 'center')}</td></tr>`).join('')}</table>`;
+    return { html, w: Math.max(...ds.map((d) => d.w)) };
   };
   const fields = new Map(c.form.fields.map((f) => [f.key, f]));
   const bg = b.background;
   const ink = '#141414', muted = '#5C5C5C';
 
-  // Event name, date and venue, with the top images above them or beside them.
-  const topGroup = group(topImgs, logoPlace === 'above' ? 0.8 : 0.6, logoPlace === 'above' ? logoAlign : null);
-  const bottomGroup = group(bottomImgs, 0.8, 'center');
+  // Event name, date and venue, with images above them and/or beside them.
   const titleBlock = `<h1 style="${hfont}margin:0;font-size:24px;line-height:31px;font-weight:bold;color:${ink}">${esc(c.details.name)}</h1>
     ${c.details.date ? `<p style="${font}margin:8px 0 0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.date)}</p>` : ''}
     ${c.details.venue ? `<p style="${font}margin:0;font-size:15px;line-height:22px;color:${muted}">${esc(c.details.venue)}</p>` : ''}`;
-  let header;
-  if (topImgs.length && logoPlace !== 'above') {
-    const logoCell = `<td class="eg-side eg-side-logo" width="${topGroup.w}" valign="middle" style="width:${topGroup.w}px;padding:0 ${logoPlace === 'left' ? 20 : 0}px 0 ${logoPlace === 'right' ? 20 : 0}px">${topGroup.html}</td>`;
-    const textCell = `<td class="eg-side" dir="ltr" valign="middle" style="text-align:left">${titleBlock}</td>`;
-    // On phones the two cells stack, logo first. For "right of the name" the table runs right-to-left,
-    // so the logo cell still comes first in the code (and on top when stacked) but shows on the right.
-    header = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"${logoPlace === 'right' ? ' dir="rtl"' : ''}><tr>${logoCell}${textCell}</tr></table>`;
-  } else {
-    header = `${topImgs.length ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${logoAlign}" style="padding:0 0 20px">${topGroup.html}</td></tr></table>` : ''}
-    ${titleBlock}`;
-  }
+  const aboveRow = zoneRow(above);
+  let header = aboveRow ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:0 0 20px">${aboveRow}</td></tr></table>` : '';
+  if (besideLeft.length || besideRight.length) {
+    // On phones the cells stack: left images, then the name, then right images.
+    const cell = (list, padding) => { const g = side(list); return `<td class="eg-side eg-side-logo" width="${g.w}" valign="middle" style="width:${g.w}px;padding:${padding}">${g.html}</td>`; };
+    header += `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${besideLeft.length ? cell(besideLeft, '0 20px 0 0') : ''}<td class="eg-side" valign="middle" style="text-align:left">${titleBlock}</td>${besideRight.length ? cell(besideRight, '0 0 0 20px') : ''}</tr></table>`;
+  } else header += titleBlock;
+  const bottomRow = zoneRow(bottom);
 
   const row = (label, value) =>
     `<tr><td width="150" valign="top" style="${font}padding:9px 16px 9px 0;color:${muted};font-size:14px;line-height:20px;width:150px;border-bottom:1px solid #EEEEEE">${esc(label)}</td>` +
@@ -199,12 +209,12 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
     <p style="margin:0;font-family:'Courier New',Courier,monospace;font-size:22px;line-height:28px;font-weight:bold;letter-spacing:3px;color:${ink}">${esc(passCode)}</p>
     <p style="${font}margin:4px 0 0;font-size:13px;line-height:18px;color:${muted}">Pass code</p>
   </td></tr>` : ''}
-  <tr><td class="eg-pad" style="padding:8px 40px ${footer ? '8px' : bottomImgs.length ? '20px' : '36px'}">
+  <tr><td class="eg-pad" style="padding:8px 40px ${footer ? '8px' : bottomRow ? '20px' : '36px'}">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E6E6E6">${summary.join('')}</table>
   </td></tr>
-  ${footer ? `<tr><td class="eg-pad" style="padding:20px 40px ${bottomImgs.length ? '20px' : '36px'}">${footer}</td></tr>` : ''}
-  ${bottomImgs.length ? `<tr><td class="eg-pad" align="center" style="padding:0 40px 32px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E6E6E6"><tr><td align="center" style="padding:24px 0 0">${bottomGroup.html}</td></tr></table>
+  ${footer ? `<tr><td class="eg-pad" style="padding:20px 40px ${bottomRow ? '20px' : '36px'}">${footer}</td></tr>` : ''}
+  ${bottomRow ? `<tr><td class="eg-pad" style="padding:0 40px 32px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #E6E6E6"><tr><td style="padding:24px 0 0">${bottomRow}</td></tr></table>
   </td></tr>` : ''}
 </table>
 <!--[if mso]></td></tr></table><![endif]-->
@@ -243,7 +253,7 @@ function renderPassEmail({ event, values, passCode, uploadsDir }) {
     'Powered by Jupiter Systems, Inc.',
   ].filter((l) => l !== null).join('\n');
 
-  const images = [...topImgs, ...bottomImgs].map((im) => ({ path: im.file, cid: im.cid }));
+  const images = allImgs.map((im) => ({ path: im.file, cid: im.cid }));
   return { subject, html, text, images, withQr };
 }
 

@@ -1,6 +1,8 @@
 # EventGate: Event Registration System
 
-**Version 1.0** · 21 October 2026 · Jupiter Systems, Inc.
+**Version 1.1** · 23 October 2026 · Jupiter Systems, Inc.
+
+What's new in 1.1: up to 2 images per event, optimized automatically on upload; each image placed and sized on its own on the registration page, in the email and on the name tag; "the" before the event name in the email's closing line.
 
 One system for many events. Each event gets its own registration page at `yourdomain.com/<event-address>`, with its own branding, form fields, confirmation email, name tag, check-in PIN, records, backups and client logins. Registrants receive a QR pass by email, and staff scan it at the door to check them in and print a name tag.
 
@@ -25,7 +27,7 @@ One system for many events. Each event gets its own registration page at `yourdo
 - **Email**: sender name, reply-to address, subject, message with registrant details like `{first_name}`, the details listed under the QR code, footer note, and a test send.
 - **Name tag**: the two lines under the attendee's name, event name and logo.
 
-**Images**: each event can have up to 2 images (for example the event logo and a partner's logo). Uploads are trimmed of blank margins, resized and compressed automatically. For the registration page, the email and the name tag separately, each image can be shown at the top (above, left or right of the event name), at the bottom, or not at all, in a small, medium or large size; two images are sized to look balanced.
+**Images**: each event can have up to 2 images (for example the event logo and a partner's logo). Uploads are trimmed of blank margins, resized and compressed automatically. For the registration page, the email and the name tag separately, each image has its own spot (above the event name on the left, centre or right; left or right of the name; at the bottom on the left, centre or right; or not shown) and its own size. Images that share a row are sized to look balanced.
 
 **QR code for invitations**: each event's page has a "QR code for invitations" link that opens the registration page's QR code, with the link to copy and downloads as PNG, SVG (for print) or a ready-made image with the event name and date.
 
