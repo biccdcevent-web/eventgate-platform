@@ -86,6 +86,9 @@
   // ------------------------------------------------------------ sign in / out
   let me = null;
   const isOwner = () => me && me.role === 'owner';
+  // The platform administrator, or a client administrator (who manages only their client's events and accounts).
+  const canEdit = () => me && (me.role === 'owner' || me.role === 'manager');
+  const ROLE_LABEL = { owner: 'Platform admin', manager: 'Client admin', client: 'Viewer' };
   function showLogin(message) {
     try { sessionStorage.removeItem('eg_signed_in_tab'); } catch {}
     closeStream();
@@ -164,9 +167,12 @@
     document.documentElement.dataset.charts = me.canCharts ? 'yes' : 'no';
     $('loginView').hidden = true; $('appView').hidden = false;
     $('whoName').textContent = me.name;
-    $('whoRole').textContent = isOwner() ? 'Admin' : 'Client';
+    $('whoRole').textContent = ROLE_LABEL[me.role] || 'Viewer';
+    $('whoRole').title = me.clientName || '';
+    $('whoName').textContent = me.clientName ? `${me.name} (${me.clientName})` : me.name;
     $('myPw').hidden = isOwner();
     document.querySelectorAll('[data-owner]').forEach((el) => { el.hidden = !isOwner(); });
+    document.querySelectorAll('[data-editor]').forEach((el) => { el.hidden = !canEdit(); });
     $('hostLabel').textContent = `${location.host}/`;
     await route();
   }
@@ -187,12 +193,13 @@
     lastHash = location.hash;
     const h = location.hash.replace(/^#\/?/, '');
     const parts = h.split('/').filter(Boolean);
-    for (const id of ['vEvents', 'vUsers', 'vEvent']) $(id).hidden = true;
+    for (const id of ['vEvents', 'vUsers', 'vClients', 'vEvent']) $(id).hidden = true;
     document.querySelectorAll('#mainnav a').forEach((a) => a.removeAttribute('aria-current'));
     if (parts[0] === 'e' && parts[1]) return showEvent(Number(parts[1]), parts[2] || 'dash');
     closeStream();
     window.Settings && window.Settings.close();
-    if (parts[0] === 'users' && isOwner()) return showUsers();
+    if (parts[0] === 'users' && canEdit()) return showUsers();
+    if (parts[0] === 'clients' && isOwner()) return showClients();
     return showEvents();
   }
   const go = (hash) => { if (location.hash === hash) route(); else location.hash = hash; };
@@ -205,9 +212,13 @@
     document.querySelector('[data-nav="events"]').setAttribute('aria-current', 'page');
     document.title = 'Events · Event admin';
     try { await loadEvents(); } catch { return; }
-    if (!isOwner() && events.length === 1 && !sessionStorage.getItem('sawList')) { sessionStorage.setItem('sawList', '1'); return go(`#/e/${events[0].id}`); }
-    $('evKicker').textContent = isOwner() ? 'All events' : 'Your events';
+    if (!canEdit() && events.length === 1 && !sessionStorage.getItem('sawList')) { sessionStorage.setItem('sawList', '1'); return go(`#/e/${events[0].id}`); }
+    $('evKicker').textContent = isOwner() ? 'All events' : me.role === 'manager' ? me.clientName : 'Your events';
     if (isOwner()) {
+      try { clients = await api('/api/admin/clients'); } catch {}
+      $('clientFilter').innerHTML = `<option value="">All clients</option><option value="none">Jupiter (no client)</option>` + clients.map((c) => `<option value="${c.id}"${String(c.id) === evClient ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+      $('clientFilter').value = evClient;
+      $('clientFilterBox').hidden = !clients.length;
       try {
         const p = await api('/api/admin/platform');
         $('homeEvent').innerHTML = `<option value="">Nothing (a general page)</option>` + events.map((e) => `<option value="${esc(e.slug)}"${e.slug === p.homeEvent ? ' selected' : ''}>${esc(e.name)}</option>`).join('');
@@ -216,7 +227,8 @@
     renderEvents();
   }
   function renderEvents() {
-    const list = events.filter((e) => (evFilter === 'archived' ? e.status === 'archived' : e.status !== 'archived'));
+    const list = events.filter((e) => (evFilter === 'archived' ? e.status === 'archived' : e.status !== 'archived'))
+      .filter((e) => !isOwner() || !evClient || (evClient === 'none' ? !e.clientId : String(e.clientId) === evClient));
     $('evGrid').innerHTML = list.length ? list.map((e) => `
       <article class="ev-card" style="--ev:${esc(e.primary)}">
         <div class="body">
@@ -224,7 +236,7 @@
             <div><h2>${esc(e.name)}</h2><div class="meta">${e.date || e.venue ? [e.date, e.venue].filter(Boolean).map((x) => `<span style="display:block">${esc(x)}</span>`).join('') : 'No date set yet'}</div></div>
             ${e.logo ? `<img class="logo" src="${esc(e.logo)}" alt="">` : ''}
           </div>
-          <div class="chips"><span class="chip ${e.status}">${STATUS_LABEL[e.status]}</span>${e.isHome ? '<span class="chip home">Main address</span>' : ''}</div>
+          <div class="chips"><span class="chip ${e.status}">${STATUS_LABEL[e.status]}</span>${e.isHome ? '<span class="chip home">Main address</span>' : ''}${isOwner() && e.clientName ? `<span class="chip client">${esc(e.clientName)}</span>` : ''}</div>
           <a class="url" href="/${esc(e.slug)}" target="_blank" rel="noopener">${esc(location.host)}/${esc(e.slug)}</a>
           <div class="counts">
             <div><b class="num">${nf.format(e.registered)}</b><span>registered${e.capacity ? ` of ${nf.format(e.capacity)}` : ''}</span></div>
@@ -233,16 +245,19 @@
         </div>
         <div class="foot">
           <a class="btn btn-primary btn-sm" href="#/e/${e.id}">Dashboard</a>
-          ${isOwner() ? `<a class="btn btn-quiet btn-sm" href="#/e/${e.id}/settings">Settings</a>${e.checkin ? `<a class="btn btn-quiet btn-sm" href="/${esc(e.slug)}/checkin" target="_blank" rel="noopener">Check-in page</a>` : ''}` : ''}
+          ${canEdit() ? `<a class="btn btn-quiet btn-sm" href="#/e/${e.id}/settings">Settings</a>${e.checkin ? `<a class="btn btn-quiet btn-sm" href="/${esc(e.slug)}/checkin" target="_blank" rel="noopener">Check-in page</a>` : ''}` : ''}
         </div>
       </article>`).join('')
-      : `<p class="empty" style="grid-column:1/-1">${evFilter === 'archived' ? 'No archived events.' : isOwner() ? 'No events yet. Use “New event” to create your first one.' : 'No events have been shared with you yet.'}</p>`;
+      : `<p class="empty" style="grid-column:1/-1">${evFilter === 'archived' ? 'No archived events.' : canEdit() ? 'No events yet. Use “New event” to create your first one.' : 'No events have been shared with you yet.'}</p>`;
   }
   document.querySelectorAll('[data-evf]').forEach((b) => b.addEventListener('click', () => {
     evFilter = b.dataset.evf;
     document.querySelectorAll('[data-evf]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     renderEvents();
   }));
+  let clients = [];
+  let evClient = '';
+  $('clientFilter').addEventListener('change', (e) => { evClient = e.target.value; renderEvents(); });
   $('homeEvent').addEventListener('change', async (e) => {
     try { await post('/api/admin/platform', { homeEvent: e.target.value }, 'PUT'); await loadEvents(); renderEvents(); }
     catch (err) { alert(err.message); }
@@ -257,6 +272,7 @@
       fields: [
         { id: 'name', label: 'Event name', maxlength: 120 },
         { id: 'slug', label: 'Web address', prefix: `${location.host}/`, maxlength: 50, help: 'Lowercase letters, numbers and dashes. This is the link you share.' },
+        ...(isOwner() && clients.length ? [{ id: 'client', label: 'Client', type: 'select', value: evClient && evClient !== 'none' ? evClient : '', options: [['', 'Jupiter (no client)'], ...clients.filter((c) => c.active).map((c) => [String(c.id), c.name])], help: 'The client’s administrators will be able to manage it.' }] : []),
         { id: 'copy', label: 'Start from', type: 'select', value: '', options: [['', 'Standard settings'], ...events.map((e) => [String(e.id), `Copy settings from ${e.name}`])], help: 'Copying brings over branding, form fields, email and name tag settings, but not registrations.' },
       ],
       okLabel: 'Create event',
@@ -265,7 +281,7 @@
         $('dlg_slug').addEventListener('input', () => { slugTouched = true; });
       },
       run: async (v) => {
-        const ev = await post('/api/admin/events', { name: v.name, slug: v.slug.trim().toLowerCase(), copyFrom: v.copy ? Number(v.copy) : null });
+        const ev = await post('/api/admin/events', { name: v.name, slug: v.slug.trim().toLowerCase(), copyFrom: v.copy ? Number(v.copy) : null, clientId: v.client ? Number(v.client) : null });
         go(`#/e/${ev.id}/settings`);
       },
     });
@@ -278,34 +294,71 @@
     const a = new Uint32Array(12); crypto.getRandomValues(a);
     return Array.from(a, (n) => chars[n % chars.length]).join('').replace(/(.{4})(?!$)/g, '$1-');
   };
-  const eventChecks = (name, selected) => events.filter((e) => e.status !== 'archived' || selected.includes(e.id)).map((e) => `<label class="check"><input type="checkbox" name="${name}" value="${e.id}"${selected.includes(e.id) ? ' checked' : ''}> <span>${esc(e.name)} <span style="color:var(--muted)">(${STATUS_LABEL[e.status]})</span></span></label>`).join('') || '<p class="help">Create an event first.</p>';
+  // Events a viewer can be given: their client's events (or any event, for the platform's own viewers).
+  const eventChecks = (name, selected, clientId = null) => events
+    .filter((e) => (e.status !== 'archived' || selected.includes(e.id)) && (!clientId || e.clientId === clientId))
+    .map((e) => `<label class="check"><input type="checkbox" name="${name}" value="${e.id}"${selected.includes(e.id) ? ' checked' : ''}> <span>${esc(e.name)} <span style="color:var(--muted)">(${STATUS_LABEL[e.status]})</span></span></label>`).join('')
+    || `<p class="help">${clientId ? 'This client has no events yet.' : 'Create an event first.'}</p>`;
   const checkedIds = (root, name) => [...root.querySelectorAll(`input[name="${name}"]:checked`)].map((i) => Number(i.value));
+
+  // The client a new account belongs to: chosen by the platform administrator, fixed for a client administrator.
+  const formClientId = () => (isOwner() ? (Number($('uClient').value) || null) : null);
+  function syncUserForm(keepEvents) {
+    const manager = $('uRole').value === 'manager';
+    if (isOwner()) {
+      const none = $('uClient').querySelector('option[value=""]');
+      if (none) none.disabled = manager;
+      if (manager && !$('uClient').value && clients.length) $('uClient').value = String(clients.filter((c) => c.active)[0]?.id || '');
+      $('uClientHelp').textContent = clients.length ? (manager ? 'The client this administrator manages.' : 'Choose a client, or Jupiter for your own viewers.') : 'Add a client on the Clients page first.';
+    }
+    $('userForm').querySelectorAll('.viewer-only').forEach((el) => { el.hidden = manager; });
+    $('userForm').querySelectorAll('.manager-only').forEach((el) => { el.hidden = !manager; });
+    if (!keepEvents) $('uEvents').innerHTML = eventChecks('uEv', [], isOwner() ? formClientId() : null);
+  }
+  $('uRole').addEventListener('change', () => syncUserForm());
+  $('uClient').addEventListener('change', () => syncUserForm());
 
   async function showUsers() {
     $('vUsers').hidden = false;
     document.querySelector('[data-nav="users"]').setAttribute('aria-current', 'page');
-    document.title = 'Users · Event admin';
-    try { await loadEvents(); users = await api('/api/admin/users'); } catch { return; }
-    $('uEvents').innerHTML = eventChecks('uEv', []);
+    document.title = 'Accounts · Event admin';
+    try {
+      await loadEvents();
+      users = await api('/api/admin/users');
+      clients = await api('/api/admin/clients');
+    } catch { return; }
+    $('uKicker').textContent = isOwner() ? 'Sign-in accounts' : me.clientName;
+    if (isOwner()) {
+      const prev = $('uClient').value;
+      $('uClient').innerHTML = `<option value="">Jupiter (no client)</option>` + clients.filter((c) => c.active).map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      if (prev) $('uClient').value = prev;
+    }
+    syncUserForm();
     renderUsers();
   }
   $('uGen').addEventListener('click', () => { $('uPw').value = genPassword(); });
+  const isSelf = (u) => !isOwner() && u.username === me.username;
   function renderUsers() {
-    $('userRows').innerHTML = users.length ? users.map((u) => `<tr data-id="${u.id}">
+    $('userRows').innerHTML = users.length ? users.map((u) => {
+      const manager = u.role === 'manager';
+      return `<tr data-id="${u.id}">
       <td><b>${esc(u.name)}</b><span class="small">${esc(u.username)}</span></td>
-      <td>${u.events.map((e) => esc(e.name)).join('<br>') || '<span style="color:var(--muted)">None</span>'}</td>
-      <td>${[u.canExport ? 'Download' : '', u.canCharts ? 'Charts' : ''].filter(Boolean).join(' · ') || '<span style="color:var(--muted)">View only</span>'}</td>
+      <td><span class="type-badge ${manager ? 'manager' : ''}">${manager ? 'Client admin' : 'Viewer'}</span>${isOwner() ? `<span class="small">${esc(u.clientName || 'Jupiter (no client)')}</span>` : ''}</td>
+      <td>${manager ? '<span style="color:var(--muted)">All of the client’s events</span>' : u.events.map((e) => esc(e.name)).join('<br>') || '<span style="color:var(--muted)">None</span>'}</td>
+      <td>${manager ? 'Full access' : [u.canExport ? 'Download' : '', u.canCharts ? 'Charts' : ''].filter(Boolean).join(' · ') || '<span style="color:var(--muted)">View only</span>'}</td>
       <td>${u.active ? `<span class="badge in">${ICON.check}Active</span>` : '<span class="badge off">Turned off</span>'}${u.temporaryPassword ? '<span class="small">Temporary password, not yet changed</span>' : ''}</td>
       <td class="num">${u.lastLoginAt ? esc(dateTimeOf(u.lastLoginAt)) : '<span style="color:var(--muted)">Never</span>'}</td>
       <td><div class="row-actions">
-        <button class="btn btn-quiet btn-sm" type="button" data-act="events">Events…</button>
+        ${manager ? '' : `<button class="btn btn-quiet btn-sm" type="button" data-act="events">Events…</button>
         <button class="btn btn-quiet btn-sm" type="button" data-act="export">${u.canExport ? 'Block download' : 'Allow download'}</button>
-        <button class="btn btn-quiet btn-sm" type="button" data-act="charts">${u.canCharts ? 'Block charts' : 'Allow charts'}</button>
+        <button class="btn btn-quiet btn-sm" type="button" data-act="charts">${u.canCharts ? 'Block charts' : 'Allow charts'}</button>`}
+        ${u.clientId && !isSelf(u) ? `<button class="btn btn-quiet btn-sm" type="button" data-act="role">${manager ? 'Make viewer' : 'Make client admin'}</button>` : ''}
         <button class="btn btn-quiet btn-sm" type="button" data-act="pw">Reset password</button>
-        <button class="btn btn-quiet btn-sm" type="button" data-act="active">${u.active ? 'Turn off' : 'Turn on'}</button>
-        <button class="btn btn-quiet btn-sm btn-danger-text" type="button" data-act="delete">Delete</button>
-      </div></td></tr>`).join('')
-      : '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">No client users yet. Add one above.</td></tr>';
+        ${isSelf(u) ? '<span class="small">This is you</span>' : `<button class="btn btn-quiet btn-sm" type="button" data-act="active">${u.active ? 'Turn off' : 'Turn on'}</button>
+        <button class="btn btn-quiet btn-sm btn-danger-text" type="button" data-act="delete">Delete</button>`}
+      </div></td></tr>`;
+    }).join('')
+      : '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">No accounts yet. Add one above.</td></tr>';
   }
   function showCreated(title, name, username, password) {
     const text = `Sign-in details for ${name}\nPage: ${location.origin}/admin\nUsername: ${username}\nTemporary password: ${password}`;
@@ -320,11 +373,15 @@
   $('userForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     $('uErr').textContent = '';
-    const body = { name: $('uName').value.trim(), username: $('uUser').value.trim(), password: $('uPw').value, canExport: $('uExport').checked, canCharts: $('uCharts').checked, events: checkedIds($('userForm'), 'uEv') };
+    const role = $('uRole').value;
+    const body = { name: $('uName').value.trim(), username: $('uUser').value.trim(), password: $('uPw').value, role, clientId: formClientId(), canExport: $('uExport').checked, canCharts: $('uCharts').checked, events: role === 'viewer' ? checkedIds($('userForm'), 'uEv') : [] };
     try {
       const u = await post('/api/admin/users', body);
-      showCreated('User added.', u.name, u.username, body.password);
+      showCreated(role === 'manager' ? 'Client administrator added.' : 'Viewer added.', u.name, u.username, body.password);
+      const keepClient = $('uClient').value;
       $('userForm').reset(); $('uExport').checked = true; $('uCharts').checked = false;
+      if (isOwner()) $('uClient').value = keepClient;
+      syncUserForm();
       reloadUsers();
     } catch (err) { if (err.message !== 'signed out') $('uErr').textContent = err.message; }
   });
@@ -335,12 +392,21 @@
     if (!u) return;
     const act = btn.dataset.act;
     const patch = (body) => post(`/api/admin/users/${u.id}`, body, 'PATCH');
+    const chooseEvents = (title, extra = {}) => openDialog({
+      title,
+      fields: [{ id: 'evs', type: 'html', html: `<div class="checks" id="dlgEvs">${eventChecks('dEv', u.events.map((x) => x.id), u.clientId)}</div>` }],
+      okLabel: 'Save',
+      run: async () => { await patch({ ...extra, events: checkedIds($('dlgEvs'), 'dEv') }); await reloadUsers(); },
+    });
     if (act === 'events') {
+      chooseEvents(`Events ${u.name} can view`);
+    } else if (act === 'role') {
+      if (u.role === 'manager') return chooseEvents(`Make ${u.name} a viewer: choose the events they can see`, { role: 'viewer' });
       openDialog({
-        title: `Events ${u.name} can view`,
-        fields: [{ id: 'evs', type: 'html', html: `<div class="checks" id="dlgEvs">${eventChecks('dEv', u.events.map((x) => x.id))}</div>` }],
-        okLabel: 'Save',
-        run: async () => { await patch({ events: checkedIds($('dlgEvs'), 'dEv') }); await reloadUsers(); },
+        title: `Make ${u.name} a client administrator?`,
+        body: `<p>They’ll be able to create and change all of <b>${esc(u.clientName)}</b>’s events, and add or remove its accounts. They’ll be signed out and sign in again.</p>`,
+        okLabel: 'Make client admin',
+        run: async () => { await patch({ role: 'manager' }); await reloadUsers(); },
       });
     } else if (act === 'export') {
       patch({ canExport: !u.canExport }).then(reloadUsers).catch((err) => alert(err.message));
@@ -358,7 +424,7 @@
       if (!u.active) return patch({ active: true }).then(reloadUsers).catch((err) => alert(err.message));
       openDialog({
         title: `Turn off ${u.name}?`,
-        body: '<p>They will be signed out now and can’t sign in until you turn the account back on.</p>',
+        body: '<p>They will be signed out now and can’t sign in until the account is turned back on.</p>',
         okLabel: 'Turn off', danger: true,
         run: async () => { await patch({ active: false }); reloadUsers(); },
       });
@@ -366,8 +432,81 @@
       openDialog({
         title: `Delete ${u.name}?`,
         body: `<p>The account <b>${esc(u.username)}</b> is removed permanently and signed out. Event records aren’t affected.</p>`,
-        okLabel: 'Delete user', danger: true,
+        okLabel: 'Delete account', danger: true,
         run: async () => { await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); reloadUsers(); },
+      });
+    }
+  });
+
+  // ------------------------------------------------------------ clients (platform administrator)
+  async function showClients() {
+    $('vClients').hidden = false;
+    document.querySelector('[data-nav="clients"]').setAttribute('aria-current', 'page');
+    document.title = 'Clients · Event admin';
+    try { clients = await api('/api/admin/clients'); } catch { return; }
+    renderClients();
+  }
+  function renderClients() {
+    $('clientRows').innerHTML = clients.length ? clients.map((c) => `<tr data-id="${c.id}">
+      <td><b>${esc(c.name)}</b>${c.contact ? `<span class="small">${esc(c.contact)}</span>` : ''}</td>
+      <td class="num">${nf.format(c.activeEvents)} active${c.maxEvents ? ` of ${nf.format(c.maxEvents)} allowed` : ''}<span class="small">${nf.format(c.events)} in total</span></td>
+      <td class="num">${nf.format(c.users)}<span class="small">${plural(c.managers, 'client admin', 'client admins')}</span></td>
+      <td>${c.active ? `<span class="badge in">${ICON.check}Active</span>` : '<span class="badge off">Turned off</span>'}</td>
+      <td><div class="row-actions">
+        <button class="btn btn-quiet btn-sm" type="button" data-act="events">Events</button>
+        <button class="btn btn-quiet btn-sm" type="button" data-act="admin">Add client admin</button>
+        <button class="btn btn-quiet btn-sm" type="button" data-act="edit">Edit…</button>
+        <button class="btn btn-quiet btn-sm" type="button" data-act="active">${c.active ? 'Turn off' : 'Turn on'}</button>
+        ${c.events || c.users ? '' : '<button class="btn btn-quiet btn-sm btn-danger-text" type="button" data-act="delete">Delete</button>'}
+      </div></td></tr>`).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px">No clients yet. Add your first one above.</td></tr>';
+  }
+  const reloadClients = async () => { clients = await api('/api/admin/clients'); renderClients(); };
+  $('clientForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('cErr').textContent = '';
+    try {
+      await post('/api/admin/clients', { name: $('cName').value.trim(), contact: $('cContact').value.trim(), maxEvents: $('cMax').value.trim() || null });
+      $('clientForm').reset();
+      reloadClients();
+    } catch (err) { if (err.message !== 'signed out') $('cErr').textContent = err.message; }
+  });
+  $('clientRows').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const c = clients.find((x) => x.id === Number(btn.closest('tr').dataset.id));
+    if (!c) return;
+    const patch = (body) => post(`/api/admin/clients/${c.id}`, body, 'PATCH');
+    const act = btn.dataset.act;
+    if (act === 'events') { evClient = String(c.id); go('#/'); }
+    else if (act === 'admin') {
+      go('#/users');
+      setTimeout(() => { $('uRole').value = 'manager'; $('uClient').value = String(c.id); syncUserForm(); $('uName').focus(); }, 300);
+    } else if (act === 'edit') {
+      openDialog({
+        title: `Edit ${c.name}`,
+        fields: [
+          { id: 'name', label: 'Client name', value: c.name, maxlength: 100 },
+          { id: 'contact', label: 'Contact (optional)', value: c.contact, maxlength: 200 },
+          { id: 'max', label: 'Active event limit (optional)', value: c.maxEvents ? String(c.maxEvents) : '', help: 'Events that aren’t archived. Leave blank for no limit. Existing events aren’t affected.' },
+        ],
+        okLabel: 'Save',
+        run: async (v) => { await patch({ name: v.name, contact: v.contact, maxEvents: v.max.trim() || null }); await reloadClients(); },
+      });
+    } else if (act === 'active') {
+      if (!c.active) return patch({ active: true }).then(reloadClients).catch((err) => alert(err.message));
+      openDialog({
+        title: `Turn off ${c.name}?`,
+        body: `<p>All ${plural(c.users, 'account', 'accounts')} of this client are signed out now and can’t sign in until you turn it back on. Its registration and check-in pages keep working.</p>`,
+        okLabel: 'Turn off', danger: true,
+        run: async () => { await patch({ active: false }); await reloadClients(); },
+      });
+    } else if (act === 'delete') {
+      openDialog({
+        title: `Delete ${c.name}?`,
+        body: '<p>The client has no events or accounts, so nothing else is affected.</p>',
+        okLabel: 'Delete client', danger: true,
+        run: async () => { await api(`/api/admin/clients/${c.id}`, { method: 'DELETE' }); await reloadClients(); },
       });
     }
   });
@@ -475,9 +614,9 @@
     const icon = (k) => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[k]}</svg>`;
     $('evLinks').innerHTML = `<button type="button" class="btn btn-primary btn-sm" id="shareBtn">${icon('qr')}QR code for invitations</button>` +
       `<a class="btn btn-quiet btn-sm" href="/${esc(cur.slug)}" target="_blank" rel="noopener">${icon('page')}Open registration page</a>` +
-      (isOwner() && checkinOn() ? `<a class="btn btn-quiet btn-sm" href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">${icon('checkin')}Open check-in page</a>` : '');
+      (canEdit() && checkinOn() ? `<a class="btn btn-quiet btn-sm" href="/${esc(cur.slug)}/checkin" target="_blank" rel="noopener">${icon('checkin')}Open check-in page</a>` : '');
     $('shareBtn').addEventListener('click', openShare);
-    $('backLink').hidden = !isOwner() && events.length <= 1;
+    $('backLink').hidden = !canEdit() && events.length <= 1;
     document.querySelectorAll('#evTabs a').forEach((a) => {
       a.href = `#/e/${cur.id}${a.dataset.tab === 'dash' ? '' : `/${a.dataset.tab}`}`;
       if (a.dataset.tab === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
@@ -493,7 +632,7 @@
   }
 
   async function showEvent(id, which) {
-    if (!isOwner() && which !== 'dash') which = 'dash';
+    if (!canEdit() && which !== 'dash') which = 'dash';
     const switching = !cur || cur.id !== id;
     $('vEvent').hidden = false;
     tab = which;

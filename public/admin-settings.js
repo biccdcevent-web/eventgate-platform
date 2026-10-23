@@ -15,6 +15,7 @@
   let device = 'desktop';
   let openKey = null;       // field whose editor is expanded
   let platform = { senderAddress: '', smtp: true };
+  let clientList = [];      // for the platform administrator: clients an event can belong to
 
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const isDirty = () => Boolean(draft) && JSON.stringify(draft) !== saved;
@@ -35,11 +36,12 @@
     root.hidden = false;
     if (ev && ev.id === e.id && draft) return;
     ev = e;
-    draft = clone({ slug: e.slug, status: e.status, staffPin: e.staffPin, config: e.config });
+    draft = clone({ slug: e.slug, status: e.status, staffPin: e.staffPin, clientId: e.clientId || null, config: e.config });
     saved = JSON.stringify(draft);
     openKey = null;
     A.setLeaveGuard(guard);
     try { platform = await A.api('/api/admin/platform'); } catch {}
+    if (A.me && A.me.role === 'owner') { try { clientList = await A.api('/api/admin/clients'); } catch {} }
     build();
   }
   function close() {
@@ -335,6 +337,9 @@
         <div class="field"><span class="lbl">Status</span><div class="status-pick">
           ${STATUSES.map(([k, l, d]) => `<label><input type="radio" name="s_status" value="${k}"${draft.status === k ? ' checked' : ''}><span><b>${l}</b>${d}</span></label>`).join('')}
         </div></div>
+        ${A.me && A.me.role === 'owner' && clientList.length ? `<div class="field"><label for="s_client">Client</label><select id="s_client">
+          <option value="">Jupiter (no client)</option>${clientList.map((c) => `<option value="${c.id}"${c.id === draft.clientId ? ' selected' : ''}>${esc(c.name)}${c.active ? '' : ' (turned off)'}</option>`).join('')}
+        </select><p class="help">The client’s administrators can manage this event. Moving it removes access for viewers of another client.</p></div>` : ''}
       </section>
       <section class="card stack">
         <div id="schedBox">${scheduleHtml()}</div>
@@ -611,6 +616,7 @@
       body.querySelectorAll('input[name="s_status"]').forEach((r) => r.addEventListener('change', () => { draft.status = r.value; changed(); }));
       $('s_slug').addEventListener('input', (e) => { const s = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'); if (s !== e.target.value) e.target.value = s; draft.slug = s; changed(); });
       wireSchedule();
+      if ($('s_client')) $('s_client').addEventListener('change', (e) => { draft.clientId = e.target.value ? Number(e.target.value) : null; changed(); });
     },
     checkin(body) {
       if ($('pinGen')) $('pinGen').addEventListener('click', () => { const pin = String(100000 + Math.floor(Math.random() * 900000)); $('s_pin').value = pin; draft.staffPin = pin; changed(); });
@@ -799,10 +805,10 @@
     btn.disabled = true;
     $('saveErr').textContent = '';
     try {
-      const fresh = await A.post(`/api/admin/events/${ev.id}`, { slug: draft.slug, status: draft.status, staffPin: draft.staffPin, config: draft.config }, 'PUT');
+      const fresh = await A.post(`/api/admin/events/${ev.id}`, { slug: draft.slug, status: draft.status, staffPin: draft.staffPin, config: draft.config, ...(A.me && A.me.role === 'owner' ? { clientId: draft.clientId } : {}) }, 'PUT');
       const slugChanged = fresh.slug !== ev.slug;
       ev = { ...ev, ...fresh };
-      draft = clone({ slug: fresh.slug, status: fresh.status, staffPin: fresh.staffPin, config: fresh.config });
+      draft = clone({ slug: fresh.slug, status: fresh.status, staffPin: fresh.staffPin, clientId: fresh.clientId || null, config: fresh.config });
       saved = JSON.stringify(draft);
       if (slugChanged) $('pageFrame').src = `/${encodeURIComponent(fresh.slug)}?preview=1`;
       renderSection();

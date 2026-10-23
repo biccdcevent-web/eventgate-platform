@@ -196,6 +196,13 @@
   .logo-prev { width: 180px; height: 84px; border-radius: 10px; background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px; border: 1.5px dashed var(--line); display: grid; place-items: center; color: var(--muted); font-size: .82rem; overflow: hidden; }
   .logo-prev img { max-width: 160px; max-height: 70px; display: block; }
   /* image position map */
+  .role-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 4px 0 16px; }
+  .role-cards > div { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: .88rem; color: var(--muted); }
+  .role-cards b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 2px; }
+  @media (max-width: 640px) { .role-cards { grid-template-columns: 1fr; } }
+  .chip.client { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); }
+  .type-badge { display: inline-block; font-size: .78rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--info-bg); }
+  .type-badge.manager { background: var(--ok-bg); }
   .img-ctl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; align-items: center; padding: 14px; border: 1.5px solid var(--line); border-radius: 12px; }
   .img-ctl-head { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; }
   .img-ctl-head img { width: 64px; height: 36px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 3px; flex: none; }
@@ -459,7 +466,8 @@
       <b>Event admin</b>
       <nav class="mainnav" id="mainnav" aria-label="Admin sections">
         <a href="#/" data-nav="events">Events</a>
-        <a href="#/users" data-nav="users" data-owner>Users</a>
+        <a href="#/users" data-nav="users" data-editor>Accounts</a>
+        <a href="#/clients" data-nav="clients" data-owner>Clients</a>
       </nav>
     </div>
     <div class="actions">
@@ -473,7 +481,7 @@
   <section id="vEvents" hidden>
     <div class="page-head">
       <div><p class="kicker" id="evKicker">All events</p><h1>Events</h1></div>
-      <button class="btn btn-primary" id="newEvent" type="button" data-owner>
+      <button class="btn btn-primary" id="newEvent" type="button" data-editor>
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New event
       </button>
     </div>
@@ -482,6 +490,10 @@
         <button type="button" data-evf="active" aria-pressed="true">Active</button>
         <button type="button" data-evf="archived" aria-pressed="false">Archived</button>
       </div>
+      <label class="home-setting" data-owner id="clientFilterBox">
+        <span>Client</span>
+        <select id="clientFilter"></select>
+      </label>
       <label class="home-setting" data-owner>
         <span><span id="hostLabel"></span> opens</span>
         <select id="homeEvent"></select>
@@ -492,33 +504,69 @@
 
   <!-- Users -->
   <section id="vUsers" class="stack" hidden>
-    <div class="page-head"><div><p class="kicker">Client access</p><h1>Users</h1></div></div>
+    <div class="page-head"><div><p class="kicker" id="uKicker">Sign-in accounts</p><h1>Accounts</h1></div></div>
     <section class="card" aria-labelledby="newUserTitle">
-      <h2 id="newUserTitle">Add a client user</h2>
-      <p class="sub">Client users can sign in and view the dashboards of the events you choose. You can also let them add their own dashboard charts. They can't change event settings, manage users, or reset or delete records.</p>
+      <h2 id="newUserTitle">Add an account</h2>
+      <div class="role-cards" id="roleHelp">
+        <div><b>Client administrator</b><span>Creates and runs the client’s own events: settings, branding, form, email, name tags, check-in, backups and reports, and adds the client’s other accounts. Sees only that client’s events.</span></div>
+        <div><b>Viewer</b><span>Sees the dashboards of the events you choose, with optional Excel download and chart editing. Can’t change events or accounts.</span></div>
+      </div>
       <form id="userForm" novalidate>
+        <div class="form-grid three" style="margin-bottom:14px">
+          <div class="field"><label for="uRole">Account type</label><select id="uRole"><option value="viewer">Viewer</option><option value="manager">Client administrator</option></select></div>
+          <div class="field" id="uClientBox" data-owner><label for="uClient">Client</label><select id="uClient"></select><p class="help" id="uClientHelp">Add clients on the Clients page.</p></div>
+        </div>
         <div class="form-grid three">
           <div class="field"><label for="uName">Name</label><input id="uName" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Maria Santos"></div>
           <div class="field"><label for="uUser">Username</label><input id="uUser" type="text" maxlength="60" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. maria@company.com"><p class="help">Letters, numbers, dots or @. No spaces.</p></div>
           <div class="field"><label for="uPw">Password</label><div class="pw-row"><input id="uPw" type="text" maxlength="128" autocomplete="off" spellcheck="false"><button class="btn btn-quiet" type="button" id="uGen">Generate</button></div><p class="help">At least 8 characters. They can change it after signing in.</p></div>
         </div>
-        <div class="field" style="margin-top:14px"><span class="lbl">Events this user can view</span><div class="checks" id="uEvents"></div></div>
+        <div class="field viewer-only" style="margin-top:14px"><span class="lbl">Events this viewer can see</span><div class="checks" id="uEvents"></div></div>
+        <p class="notice info manager-only" style="margin:14px 0 0" id="uManagerNote">A client administrator automatically has every event of their client, including new ones they create.</p>
         <div class="form-foot">
-          <div class="checks"><label class="check"><input type="checkbox" id="uExport" checked> Can download the attendee list (Excel)</label>
+          <div class="checks viewer-only"><label class="check"><input type="checkbox" id="uExport" checked> Can download the report (Excel)</label>
           <label class="check"><input type="checkbox" id="uCharts"> Can add and remove dashboard charts</label></div>
-          <button class="btn btn-primary" type="submit">Add user</button>
+          <button class="btn btn-primary" type="submit">Add account</button>
         </div>
         <p class="err" id="uErr" role="alert"></p>
       </form>
       <div class="notice" id="uDone" hidden></div>
     </section>
     <section class="card" aria-labelledby="usersTitle">
-      <h2 id="usersTitle">Client users</h2>
-      <p class="sub">Turning a user off or resetting their password signs them out immediately.</p>
+      <h2 id="usersTitle">Accounts</h2>
+      <p class="sub">Turning an account off or resetting its password signs that person out immediately.</p>
       <div class="table-box">
         <table class="list">
-          <thead><tr><th scope="col">Name</th><th scope="col">Events</th><th scope="col">Permissions</th><th scope="col">Status</th><th scope="col">Last sign-in</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Events</th><th scope="col">Permissions</th><th scope="col">Status</th><th scope="col">Last sign-in</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
           <tbody id="userRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <!-- Clients (platform administrator) -->
+  <section id="vClients" class="stack" hidden>
+    <div class="page-head"><div><p class="kicker">Organizations using the platform</p><h1>Clients</h1></div></div>
+    <section class="card" aria-labelledby="newClientTitle">
+      <h2 id="newClientTitle">Add a client</h2>
+      <p class="sub">A client is a company or organization you offer the platform to. Its events and accounts are kept separate from every other client’s. After adding it, create its first <b>client administrator</b> on the Accounts page; they can then create events and add their own colleagues.</p>
+      <form id="clientForm" novalidate>
+        <div class="form-grid three">
+          <div class="field"><label for="cName">Client name</label><input id="cName" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Clark Development Corporation"></div>
+          <div class="field"><label for="cContact">Contact (optional)</label><input id="cContact" type="text" maxlength="200" autocomplete="off" placeholder="e.g. Maria Santos, 0917 123 4567"></div>
+          <div class="field"><label for="cMax">Active event limit (optional)</label><input id="cMax" type="number" min="1" max="10000" inputmode="numeric" placeholder="No limit"><p class="help">Events that aren’t archived. Leave blank for no limit.</p></div>
+        </div>
+        <div class="form-foot"><span></span><button class="btn btn-primary" type="submit">Add client</button></div>
+        <p class="err" id="cErr" role="alert"></p>
+      </form>
+    </section>
+    <section class="card" aria-labelledby="clientsTitle">
+      <h2 id="clientsTitle">Clients</h2>
+      <p class="sub">Turning a client off signs out all its accounts and stops them signing in. Its registration pages keep working; set its events to Closed or Archived if they should stop too.</p>
+      <div class="table-box">
+        <table class="list">
+          <thead><tr><th scope="col">Client</th><th scope="col">Events</th><th scope="col">Accounts</th><th scope="col">Status</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+          <tbody id="clientRows"></tbody>
         </table>
       </div>
     </section>
@@ -536,8 +584,8 @@
     </div>
     <nav class="tabs" id="evTabs" aria-label="Event sections">
       <a data-tab="dash">Dashboard</a>
-      <a data-tab="settings" data-owner>Settings</a>
-      <a data-tab="data" data-owner>Backup &amp; reset</a>
+      <a data-tab="settings" data-editor>Settings</a>
+      <a data-tab="data" data-editor>Backup &amp; reset</a>
     </nav>
 
     <!-- Dashboard -->
