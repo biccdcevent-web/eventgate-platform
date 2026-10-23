@@ -2,7 +2,7 @@
 
 **Version 1.1** · 23 October 2026 · Jupiter Systems, Inc.
 
-What's new in 1.1: up to 2 images per event, optimized automatically on upload; each image placed and sized on its own on the registration page, in the email and on the name tag; "the" before the event name in the email's closing line; clients with their own client administrators, who create and manage their own events and accounts.
+What's new in 1.1: up to 2 images per event, optimized automatically on upload; each image placed and sized on its own on the registration page, in the email and on the name tag; "the" before the event name in the email's closing line; clients with their own client administrators, who create and manage their own events and accounts; a raffle with a projector draw screen.
 
 One system for many events. Each event gets its own registration page at `yourdomain.com/<event-address>`, with its own branding, form fields, confirmation email, name tag, check-in PIN, records, backups and client logins. Registrants receive a QR pass by email, and staff scan it at the door to check them in and print a name tag.
 
@@ -28,6 +28,8 @@ One system for many events. Each event gets its own registration page at `yourdo
 - **Name tag**: the two lines under the attendee's name, event name and logo.
 
 **Images**: each event can have up to 2 images (for example the event logo and a partner's logo). Uploads are trimmed of blank margins, resized and compressed automatically. For the registration page, the email and the name tag separately, each image has its own spot (above the event name on the left, centre or right; left or right of the name; at the bottom on the left, centre or right; or not shown) and its own size. Images that share a row are sized to look balanced.
+
+**Raffle**: on an event's **Raffle** tab, turn the raffle on, choose who can win (checked-in attendees, recommended, or everyone registered) whether each person can win only once, how many entries each person has (one each, or **set by staff**: extra entries for, say, visiting sponsor booths, or 0 to leave organizers out; more entries mean better odds), and whether **winners must be present** (an absent winner is redrawn) or can claim later. Then list the prizes in draw order with how many of each. The **draw screen** at `yourdomain.com/<event-address>/raffle` is made for a projector: the emcee opens it with the raffle PIN (or signed in as an administrator), presses Space to draw, and names shuffle before the winner appears. Winners are chosen by the server with a secure random number before the animation starts. A winner who isn't in the room is marked **no-show** and a new winner is drawn. Every draw is recorded with its time and who ran it; prizes can be marked claimed, and the Excel report gets a **Raffle winners** tab.
 
 **QR code for invitations**: each event's page has a "QR code for invitations" link that opens the registration page's QR code, with the link to copy and downloads as PNG, SVG (for print) or a ready-made image with the event name and date.
 

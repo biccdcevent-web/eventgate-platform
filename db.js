@@ -117,6 +117,20 @@ function openDb(dbPath, env = process.env) {
   if (!cols('users').includes('role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'viewer'");
   if (!cols('users').includes('client_id')) db.exec('ALTER TABLE users ADD COLUMN client_id INTEGER');
   if (!cols('events').includes('client_id')) db.exec('ALTER TABLE events ADD COLUMN client_id INTEGER');
+  // Added later: raffle prizes (in draw order) and every draw made, kept as the raffle's record.
+  // status: 'won', 'claimed' (prize handed over) or 'noshow' (not in the room; redrawn).
+  db.exec(`CREATE TABLE IF NOT EXISTS raffle_prizes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, name TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1, position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  db.exec(`CREATE TABLE IF NOT EXISTS raffle_draws (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL, prize_id INTEGER NOT NULL, registration_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'won', drawn_at TEXT NOT NULL DEFAULT (datetime('now')), drawn_by TEXT NOT NULL DEFAULT '',
+    claimed_at TEXT)`);
+  db.exec('CREATE INDEX IF NOT EXISTS raffle_draws_event ON raffle_draws (event_id, prize_id)');
+  // Raffle entries set by staff, only for people who don't have the usual 1 (0 = left out of the raffle).
+  db.exec(`CREATE TABLE IF NOT EXISTS raffle_entries (
+    registration_id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, entries INTEGER NOT NULL, note TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')), updated_by TEXT NOT NULL DEFAULT '')`);
   if (!hasTable('saved_charts')) {
     db.exec(`CREATE TABLE saved_charts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL DEFAULT 0, title TEXT NOT NULL, dimension TEXT NOT NULL,

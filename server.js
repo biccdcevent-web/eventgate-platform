@@ -751,6 +751,7 @@ app.post('/api/admin/events', requireEditor, (req, res) => {
     config.details = { ...config.details, name, date: '', venue: '', capacity: null };
     config.branding.logo = copyLogo(config.branding.logo);
     config.branding.logo2 = copyLogo(config.branding.logo2);
+    config.raffle = { ...config.raffle, enabled: false, pin: '' }; // a copied event gets its own raffle and PIN
   } else {
     config = EG.defaultConfig({ name });
   }
@@ -787,6 +788,7 @@ app.put('/api/admin/events/:id', requireEditor, withEvent, (req, res) => {
   let config = ev.config;
   if (b.config !== undefined) {
     config = EG.sanitizeConfig(b.config, ev.config);
+    config.raffle = ev.config.raffle; // changed only on the Raffle tab, so an open Settings page can't undo it
     for (const k of ['logo', 'logo2']) {
       if (config.branding[k] && !fs.existsSync(path.join(uploadsDir, path.basename(config.branding[k])))) config.branding[k] = ev.config.branding[k];
     }
@@ -811,6 +813,9 @@ app.delete('/api/admin/events/:id', requireEditor, withEvent, (req, res) => {
   db.transaction(() => {
     evQ.remove.run(ev.id);
     db.prepare('DELETE FROM saved_charts WHERE event_id = ?').run(ev.id);
+    db.prepare('DELETE FROM raffle_draws WHERE event_id = ?').run(ev.id);
+    db.prepare('DELETE FROM raffle_prizes WHERE event_id = ?').run(ev.id);
+    db.prepare('DELETE FROM raffle_entries WHERE event_id = ?').run(ev.id);
     db.prepare('DELETE FROM user_events WHERE event_id = ?').run(ev.id);
     if (getSetting('home_event') === ev.slug) setSetting('home_event', '');
   })();
@@ -981,6 +986,247 @@ function computeStats(ev) {
 const ev$ = [requireSignedIn, withEvent];
 const evOwner$ = [requireEditor, withEvent]; // event administration: the platform administrator or the event's client administrator
 
+// ---------------------------------------------------------------- raffle
+// Prizes are drawn in order on a projector screen (/<event>/raffle), run by an event administrator or by
+// anyone with the event's raffle PIN. Winners are picked on the server with a secure random number, from
+// checked-in attendees (or all registrants), each person winning once unless the organizer allows more.
+// A winner who isn't in the room is marked "no-show" and left out of later draws; every draw is kept.
+const raffleQ = {
+  prizes: db.prepare('SELECT * FROM raffle_prizes WHERE event_id = ? ORDER BY position, id'),
+  prize: db.prepare('SELECT * FROM raffle_prizes WHERE id = ? AND event_id = ?'),
+  addPrize: db.prepare('INSERT INTO raffle_prizes (event_id, name, quantity, position) VALUES (?, ?, ?, (SELECT IFNULL(MAX(position), 0) + 1 FROM raffle_prizes WHERE event_id = ?))'),
+  updatePrize: db.prepare('UPDATE raffle_prizes SET name = ?, quantity = ? WHERE id = ?'),
+  setPosition: db.prepare('UPDATE raffle_prizes SET position = ? WHERE id = ?'),
+  removePrize: db.prepare('DELETE FROM raffle_prizes WHERE id = ?'),
+  draws: db.prepare(`SELECT d.id AS draw_id, d.prize_id, d.status, d.drawn_at, d.drawn_by, d.claimed_at, r.*
+    FROM raffle_draws d LEFT JOIN registrations r ON r.id = d.registration_id WHERE d.event_id = ? ORDER BY d.id`),
+  draw: db.prepare('SELECT * FROM raffle_draws WHERE id = ? AND event_id = ?'),
+  drawsOfPrize: db.prepare('SELECT COUNT(*) AS n FROM raffle_draws WHERE prize_id = ?'),
+  wonOfPrize: db.prepare("SELECT COUNT(*) AS n FROM raffle_draws WHERE prize_id = ? AND status != 'noshow'"),
+  insertDraw: db.prepare('INSERT INTO raffle_draws (event_id, prize_id, registration_id, drawn_by) VALUES (?, ?, ?, ?)'),
+  setStatus: db.prepare("UPDATE raffle_draws SET status = ?, claimed_at = CASE WHEN ? = 'claimed' THEN datetime('now') ELSE NULL END WHERE id = ?"),
+};
+// People who can still win this prize.
+// Each row carries its number of entries: 1 each, or as set by staff (people with 0 are left out).
+function raffleEligible(ev, prizeId) {
+  const r = ev.config.raffle;
+  const staff = r.entries === 'staff';
+  return db.prepare(`SELECT reg.*, ${staff ? 'IFNULL(e.entries, 1)' : '1'} AS raffle_entries FROM registrations reg
+    LEFT JOIN raffle_entries e ON e.registration_id = reg.id
+    WHERE reg.event_id = @e ${r.pool === 'checkedIn' ? 'AND reg.checked_in_at IS NOT NULL' : ''}
+    ${staff ? 'AND IFNULL(e.entries, 1) > 0' : ''}
+    AND reg.id NOT IN (SELECT registration_id FROM raffle_draws WHERE event_id = @e AND (status = 'noshow' OR @once = 1 OR prize_id = @p))`)
+    .all({ e: ev.id, once: r.oncePerPerson ? 1 : 0, p: prizeId || 0 });
+}
+// A weighted pick: someone with 3 entries is three times as likely to win as someone with 1.
+function pickWeighted(pool) {
+  const total = pool.reduce((s, r) => s + r.raffle_entries, 0);
+  let n = crypto.randomInt(total);
+  for (const r of pool) { n -= r.raffle_entries; if (n < 0) return r; }
+  return pool[pool.length - 1];
+}
+// The name shown for a winner, and the line under it (company, or the name tag's second line).
+function raffleWho(ev, row) {
+  if (!row || !row.id) return { name: '(record deleted)', detail: '' };
+  const c = ev.config, v = rowValues(row);
+  return { name: row.full_name, detail: row.company_name || shortValue(c, v, c.badge.line3 || c.badge.line2) || '' };
+}
+function raffleState(ev) {
+  const draws = raffleQ.draws.all(ev.id);
+  const prizes = raffleQ.prizes.all(ev.id).map((p) => {
+    const mine = draws.filter((d) => d.prize_id === p.id);
+    const out = (d) => ({ id: d.draw_id, ...raffleWho(ev, d), status: d.status, drawnAt: sqlTimeToIso(d.drawn_at), drawnBy: d.drawn_by, claimedAt: sqlTimeToIso(d.claimed_at), passCode: d.pass_code ? pretty(d.pass_code) : '' });
+    const winners = mine.filter((d) => d.status !== 'noshow').map(out);
+    return { id: p.id, name: p.name, quantity: p.quantity, drawn: winners.length, left: Math.max(0, p.quantity - winners.length), winners, noShows: mine.filter((d) => d.status === 'noshow').map(out) };
+  });
+  const pool = raffleEligible(ev, 0);
+  const r = ev.config.raffle;
+  return {
+    enabled: r.enabled, pool: r.pool, oncePerPerson: r.oncePerPerson, entries: r.entries, mustBePresent: r.mustBePresent,
+    eligible: pool.length, totalEntries: pool.reduce((s, x) => s + x.raffle_entries, 0), prizes,
+  };
+}
+const drawWinner = db.transaction((ev, prizeId, by) => {
+  const prize = raffleQ.prize.get(prizeId, ev.id);
+  if (!prize) throw Object.assign(new Error('That prize was not found.'), { status: 404 });
+  if (raffleQ.wonOfPrize.get(prize.id).n >= prize.quantity) throw Object.assign(new Error(`All ${prize.quantity} of “${prize.name}” have been drawn.`), { status: 409 });
+  const pool = raffleEligible(ev, prize.id);
+  if (!pool.length) throw Object.assign(new Error(ev.config.raffle.pool === 'checkedIn' ? 'No one is left who can win: everyone checked in has already been drawn.' : 'No one is left who can win.'), { status: 409 });
+  const pick = pickWeighted(pool);
+  const id = raffleQ.insertDraw.run(ev.id, prize.id, pick.id, String(by || '').slice(0, 80)).lastInsertRowid;
+  return { id, prize, pick, pool };
+});
+function drawResponse(ev, result) {
+  // Names that flash past on the screen before the winner lands (the winner is already chosen above).
+  const others = result.pool.filter((r) => r.id !== result.pick.id);
+  for (let i = others.length - 1; i > 0; i--) { const j = crypto.randomInt(i + 1); [others[i], others[j]] = [others[j], others[i]]; }
+  return {
+    draw: { id: result.id, prizeId: result.prize.id, prize: result.prize.name, ...raffleWho(ev, result.pick) },
+    reel: others.slice(0, 30).map((r) => raffleWho(ev, r).name),
+    state: raffleState(ev),
+  };
+}
+const raffleChanged = (ev) => bus.emit('change', { type: 'raffle', eventId: ev.id });
+
+// ---- for event administrators (the Raffle tab)
+app.get('/api/admin/events/:id/raffle', ...evOwner$, (req, res) => res.json({ ...raffleState(req.ev), pin: req.ev.config.raffle.pin, slug: req.ev.slug, checkin: req.ev.config.checkin.enabled }));
+app.put('/api/admin/events/:id/raffle/settings', ...evOwner$, (req, res) => {
+  const ev = req.ev, b = req.body || {};
+  const r = { ...ev.config.raffle };
+  if (b.enabled !== undefined) r.enabled = Boolean(b.enabled);
+  if (b.pool !== undefined) r.pool = b.pool === 'registered' || !ev.config.checkin.enabled ? 'registered' : 'checkedIn';
+  if (b.oncePerPerson !== undefined) r.oncePerPerson = Boolean(b.oncePerPerson);
+  if (b.entries !== undefined) r.entries = b.entries === 'staff' ? 'staff' : 'one';
+  if (b.mustBePresent !== undefined) r.mustBePresent = Boolean(b.mustBePresent);
+  if (b.pin !== undefined) {
+    const pin = String(b.pin).trim();
+    if (!/^\d{4,12}$/.test(pin)) return res.status(422).json({ message: 'The raffle PIN must be 4 to 12 digits.' });
+    r.pin = pin;
+  }
+  if (r.enabled && !r.pin) r.pin = String(crypto.randomInt(100000, 999999));
+  const config = { ...ev.config, raffle: r };
+  evQ.update.run({ id: ev.id, slug: ev.slug, status: ev.status, staff_pin: ev.staffPin, config: JSON.stringify(config) });
+  const fresh = eventById(ev.id);
+  raffleChanged(fresh);
+  res.json({ ...raffleState(fresh), pin: fresh.config.raffle.pin, slug: fresh.slug, checkin: fresh.config.checkin.enabled });
+});
+const prizeInput = (b) => {
+  const name = String(b.name || '').replace(/\s+/g, ' ').trim();
+  const quantity = Number(b.quantity);
+  if (name.length < 1 || name.length > 120) return { error: 'Enter the prize name (up to 120 characters).' };
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000) return { error: 'Enter how many of this prize, from 1 to 1000.' };
+  return { name, quantity };
+};
+app.post('/api/admin/events/:id/raffle/prizes', ...evOwner$, (req, res) => {
+  const p = prizeInput(req.body || {});
+  if (p.error) return res.status(422).json({ message: p.error });
+  if (raffleQ.prizes.all(req.ev.id).length >= 100) return res.status(422).json({ message: 'An event can have up to 100 prizes.' });
+  raffleQ.addPrize.run(req.ev.id, p.name, p.quantity, req.ev.id);
+  raffleChanged(req.ev);
+  res.status(201).json(raffleState(req.ev));
+});
+app.patch('/api/admin/events/:id/raffle/prizes/:pid', ...evOwner$, (req, res) => {
+  const prize = raffleQ.prize.get(Number(req.params.pid), req.ev.id);
+  if (!prize) return res.status(404).json({ message: 'That prize was not found.' });
+  const b = req.body || {};
+  if (b.move) {
+    const list = raffleQ.prizes.all(req.ev.id);
+    const i = list.findIndex((x) => x.id === prize.id), j = i + (b.move < 0 ? -1 : 1);
+    if (j >= 0 && j < list.length) { [list[i], list[j]] = [list[j], list[i]]; db.transaction(() => list.forEach((x, k) => raffleQ.setPosition.run(k + 1, x.id)))(); }
+  } else {
+    const p = prizeInput({ name: b.name ?? prize.name, quantity: b.quantity ?? prize.quantity });
+    if (p.error) return res.status(422).json({ message: p.error });
+    if (p.quantity < raffleQ.wonOfPrize.get(prize.id).n) return res.status(422).json({ message: 'More winners have already been drawn for this prize. Mark one as a no-show first.' });
+    raffleQ.updatePrize.run(p.name, p.quantity, prize.id);
+  }
+  raffleChanged(req.ev);
+  res.json(raffleState(req.ev));
+});
+app.delete('/api/admin/events/:id/raffle/prizes/:pid', ...evOwner$, (req, res) => {
+  const prize = raffleQ.prize.get(Number(req.params.pid), req.ev.id);
+  if (!prize) return res.status(404).json({ message: 'That prize was not found.' });
+  if (raffleQ.drawsOfPrize.get(prize.id).n) return res.status(409).json({ message: 'This prize has already been drawn, so it stays in the raffle record.' });
+  raffleQ.removePrize.run(prize.id);
+  raffleChanged(req.ev);
+  res.json(raffleState(req.ev));
+});
+// ---- entries set by staff
+const entriesQ = {
+  set: db.prepare(`INSERT INTO raffle_entries (registration_id, event_id, entries, note, updated_by) VALUES (@rid, @e, @n, @note, @by)
+    ON CONFLICT(registration_id) DO UPDATE SET entries = excluded.entries, note = excluded.note, updated_by = excluded.updated_by, updated_at = datetime('now')`),
+  clear: db.prepare('DELETE FROM raffle_entries WHERE registration_id = ? AND event_id = ?'),
+  clearAll: db.prepare('DELETE FROM raffle_entries WHERE event_id = ?'),
+  adjusted: db.prepare(`SELECT reg.*, e.entries AS raffle_entries, e.note AS raffle_note, e.updated_by, e.updated_at FROM raffle_entries e
+    JOIN registrations reg ON reg.id = e.registration_id WHERE e.event_id = ? ORDER BY reg.full_name COLLATE NOCASE`),
+  search: db.prepare(`SELECT reg.*, IFNULL(e.entries, 1) AS raffle_entries, IFNULL(e.note, '') AS raffle_note FROM registrations reg
+    LEFT JOIN raffle_entries e ON e.registration_id = reg.id
+    WHERE reg.event_id = @e AND (reg.full_name LIKE @q ESCAPE '\\' OR reg.email LIKE @q ESCAPE '\\' OR reg.company_name LIKE @q ESCAPE '\\' OR reg.pass_code LIKE @code ESCAPE '\\')
+    ORDER BY reg.full_name COLLATE NOCASE LIMIT 25`),
+};
+const entryOut = (ev, r) => ({ id: r.id, ...raffleWho(ev, r), passCode: pretty(r.pass_code), checkedIn: Boolean(r.checked_in_at), entries: r.raffle_entries, note: r.raffle_note || '' });
+app.get('/api/admin/events/:id/raffle/entries', ...evOwner$, (req, res) => {
+  const term = String(req.query.q || '').replace(/\s+/g, ' ').trim();
+  const adjusted = entriesQ.adjusted.all(req.ev.id).map((r) => entryOut(req.ev, r));
+  if (term.length < 2) return res.json({ adjusted, results: [] });
+  const like = `%${term.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  const code = `%${term.toUpperCase().replace(/[\s-]/g, '').replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  res.json({ adjusted, results: entriesQ.search.all({ e: req.ev.id, q: like, code }).map((r) => entryOut(req.ev, r)) });
+});
+app.put('/api/admin/events/:id/raffle/entries/:rid', ...evOwner$, (req, res) => {
+  const row = db.prepare('SELECT id FROM registrations WHERE id = ? AND event_id = ?').get(Number(req.params.rid), req.ev.id);
+  if (!row) return res.status(404).json({ message: 'That registration was not found.' });
+  const n = Number((req.body || {}).entries);
+  if (!Number.isInteger(n) || n < 0 || n > 1000) return res.status(422).json({ message: 'Entries must be a whole number from 0 to 1000.' });
+  const note = String((req.body || {}).note || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (n === 1 && !note) entriesQ.clear.run(row.id, req.ev.id);
+  else entriesQ.set.run({ rid: row.id, e: req.ev.id, n, note, by: req.auth.name });
+  raffleChanged(req.ev);
+  res.json({ ok: true, state: raffleState(req.ev) });
+});
+app.post('/api/admin/events/:id/raffle/entries/reset', ...evOwner$, (req, res) => {
+  if (String((req.body || {}).confirm || '').trim().toUpperCase() !== 'RESET') return res.status(422).json({ message: 'Type RESET to confirm.' });
+  entriesQ.clearAll.run(req.ev.id);
+  raffleChanged(req.ev);
+  res.json({ ok: true, state: raffleState(req.ev) });
+});
+
+function setDrawStatus(ev, drawId, status) {
+  const d = raffleQ.draw.get(Number(drawId), ev.id);
+  if (!d) throw Object.assign(new Error('That draw was not found.'), { status: 404 });
+  if (!['won', 'claimed', 'noshow'].includes(status)) throw Object.assign(new Error('Choose won, claimed or no-show.'), { status: 422 });
+  if (d.status === 'noshow' && status !== 'noshow') {
+    // putting a no-show back counts against the prize again
+    const prize = raffleQ.prize.get(d.prize_id, ev.id);
+    if (prize && raffleQ.wonOfPrize.get(prize.id).n >= prize.quantity) throw Object.assign(new Error('All of this prize have been given to others since. Add one more to the prize first.'), { status: 409 });
+  }
+  raffleQ.setStatus.run(status, status, d.id);
+  raffleChanged(ev);
+}
+app.post('/api/admin/events/:id/raffle/draws/:did', ...evOwner$, (req, res) => {
+  try { setDrawStatus(req.ev, req.params.did, String((req.body || {}).status || '')); }
+  catch (err) { return res.status(err.status || 500).json({ message: err.message }); }
+  res.json(raffleState(req.ev));
+});
+app.post('/api/admin/events/:id/raffle/reset', ...evOwner$, (req, res) => {
+  if (String((req.body || {}).confirm || '').trim().toUpperCase() !== 'RESET') return res.status(422).json({ message: 'Type RESET to confirm.' });
+  db.prepare('DELETE FROM raffle_draws WHERE event_id = ?').run(req.ev.id);
+  raffleChanged(req.ev);
+  res.json(raffleState(req.ev));
+});
+
+// ---- the draw screen: an event administrator who is signed in, or anyone with the raffle PIN
+function raffleAccess(req, res) {
+  const ev = eventBySlug(req.params.slug);
+  if (!ev) { notFound(res); return null; }
+  const auth = getAuth(req);
+  const admin = auth && !auth.mustChange && isEditor(auth) && canSee(auth, ev.id);
+  if (!admin && ev.status === 'draft') { notFound(res); return null; }
+  if (!ev.config.raffle.enabled) { res.status(403).json({ message: 'The raffle is turned off for this event. Turn it on in the event’s Raffle tab.', disabled: true }); return null; }
+  if (admin) { req.drawnBy = auth.name; return ev; }
+  if (!ev.config.raffle.pin || !secretMatches(req.get('x-raffle-pin'), ev.config.raffle.pin)) { res.status(401).json({ message: 'That PIN is incorrect.', needPin: true }); return null; }
+  req.drawnBy = 'Draw screen (PIN)';
+  return ev;
+}
+function rafflePublicState(ev) {
+  const b = ev.config.branding;
+  return { event: { name: ev.config.details.name, date: ev.config.details.date, slug: ev.slug }, branding: { primary: b.primary, secondary: b.secondary, headingFont: b.headingFont, bodyFont: b.bodyFont, logo: b.logo, logo2: b.logo2 }, ...raffleState(ev) };
+}
+app.get('/api/e/:slug/raffle', staffPinLimiter, (req, res) => { const ev = raffleAccess(req, res); if (ev) res.json(rafflePublicState(ev)); });
+app.post('/api/e/:slug/raffle/draw', staffPinLimiter, (req, res) => {
+  const ev = raffleAccess(req, res);
+  if (!ev) return;
+  try { res.json({ ...drawResponse(ev, drawWinner(ev, Number((req.body || {}).prizeId), req.drawnBy)), event: rafflePublicState(ev).event }); raffleChanged(ev); }
+  catch (err) { res.status(err.status || 500).json({ message: err.message }); }
+});
+app.post('/api/e/:slug/raffle/draws/:did', staffPinLimiter, (req, res) => {
+  const ev = raffleAccess(req, res);
+  if (!ev) return;
+  const status = String((req.body || {}).status || '');
+  if (!['noshow', 'claimed', 'won'].includes(status)) return res.status(422).json({ message: 'Choose claimed or no-show.' });
+  try { setDrawStatus(ev, req.params.did, status); } catch (err) { return res.status(err.status || 500).json({ message: err.message }); }
+  res.json(rafflePublicState(ev));
+});
+
 // QR code of the event's registration page, for organizers to put on invitations and posters.
 // PNG (large, for documents and chat) or SVG (sharp at any size, for print).
 app.get('/api/admin/events/:id/share-qr.:fmt', ...ev$, async (req, res, next) => {
@@ -1080,11 +1326,12 @@ async function buildWorkbook(ev, rows) {
   wb.creator = 'EventGate';
   wb.created = new Date();
 
-  function addSheet(name, title, list, extra) {
+  function addSheet(name, title, list, extra, lead = []) {
     const columns = [
       { label: 'No.', width: 6, get: (r, i) => i + 1 },
-      ...(withQr ? [{ label: 'Pass code', width: 12, get: (r) => pretty(r.pass_code) }] : []),
-      ...cols.map((x) => ({ ...x, get: (r) => x.get(valueOf.get(r)) || '' })),
+      ...lead,
+      ...(withQr ? [{ label: 'Pass code', width: 12, get: (r) => (r.pass_code ? pretty(r.pass_code) : '') }] : []),
+      ...cols.map((x) => ({ ...x, get: (r) => (valueOf.has(r) ? x.get(valueOf.get(r)) || '' : '') })),
       ...extra,
     ];
     const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 7, xSplit: 0 }], pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 } });
@@ -1142,6 +1389,22 @@ async function buildWorkbook(ev, rows) {
       { label: 'Registered on', width: 17, get: (r) => local(r.created_at) },
       { label: 'Checked in at', width: 17, get: (r) => local(r.checked_in_at) },
     ]);
+  }
+  // Raffle winners, in the order drawn (no-shows included, marked as such), when the event held a raffle.
+  const draws = raffleQ.draws.all(ev.id);
+  if (draws.length) {
+    const prizeName = new Map(raffleQ.prizes.all(ev.id).map((p) => [p.id, p.name]));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const list = draws.map((d) => byId.get(d.id) || {});
+    const STATUS = { won: 'Won', claimed: 'Prize claimed', noshow: 'No-show (redrawn)' };
+    const entryOf = new Map(db.prepare('SELECT registration_id, entries FROM raffle_entries WHERE event_id = ?').all(ev.id).map((e) => [e.registration_id, e.entries]));
+    addSheet('Raffle winners', 'Raffle Winners', list, [
+      { label: 'Drawn at', width: 17, get: (r, i) => local(draws[i].drawn_at) },
+      { label: 'Status', width: 16, get: (r, i) => STATUS[draws[i].status] || draws[i].status },
+      { label: 'Claimed at', width: 17, get: (r, i) => local(draws[i].claimed_at) },
+      { label: 'Drawn by', width: 18, get: (r, i) => draws[i].drawn_by },
+      ...(ev.config.raffle.entries === 'staff' ? [{ label: 'Entries', width: 9, get: (r) => (r.id ? (entryOf.get(r.id) ?? 1) : '') }] : []),
+    ], [{ label: 'Prize', width: 24, get: (r, i) => prizeName.get(draws[i].prize_id) || '' }]);
   }
   return wb.xlsx.writeBuffer();
 }
@@ -1283,6 +1546,8 @@ app.post('/api/admin/events/:id/data/delete-all', ...evOwner$, (req, res) => {
   if (!confirmed(req, 'DELETE')) return res.status(422).json({ message: 'Type DELETE to confirm.' });
   const backup = createBackup(req.ev, 'Automatic backup before deleting all records', req.auth.name, { skipIfEmpty: true });
   const changed = db.prepare('DELETE FROM registrations WHERE event_id = ?').run(req.ev.id).changes;
+  db.prepare('DELETE FROM raffle_draws WHERE event_id = ?').run(req.ev.id); // the winners were among those records
+  db.prepare('DELETE FROM raffle_entries WHERE event_id = ?').run(req.ev.id);
   bus.emit('change', { type: 'reset', eventId: req.ev.id });
   res.json({ ok: true, changed, backup: backupOut(backup) });
 });
@@ -1346,6 +1611,11 @@ app.get('/:slug', (req, res, next) => {
   if (RESERVED.has(slug)) return next();
   const ev = eventBySlug(slug);
   res.status(ev ? 200 : 404).sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+app.get('/:slug/raffle', (req, res, next) => {
+  const slug = req.params.slug.toLowerCase();
+  if (RESERVED.has(slug)) return next();
+  res.status(eventBySlug(slug) ? 200 : 404).sendFile(path.join(PUBLIC_DIR, 'raffle.html'));
 });
 app.get('/:slug/checkin', (req, res, next) => {
   const slug = req.params.slug.toLowerCase();
